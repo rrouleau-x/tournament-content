@@ -32,6 +32,17 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pipeline import (  # noqa: E402
+    ASSET_FIELDS,
+    EXIT_CONFIG,
+    KNOWN_NON_MODULES,
+    MODULE_REGISTRY,
+    PlatformError,
+    parse_tournament_id,
+    tournament_dir,
+)
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA_PATH = os.path.join(REPO_ROOT, "_schemas", "bundle-v1.json")
 LINK_CACHE_PATH = os.path.join(REPO_ROOT, "out", ".link-cache.json")
@@ -190,9 +201,12 @@ def check_links(urls, refresh=False):
     return results
 
 
-def run_checks(bundle_data, report, run_link_checks=True, refresh_links=False):
+def run_checks(bundle_data, report, run_link_checks=True, refresh_links=False,
+               tdir=None):
     """Run the full validation battery against a bundle dict. Shared by the
-    CLI and deploy.py so the two can never drift."""
+    CLI and deploy.py so the two can never drift. tdir (tournament dir) is
+    optional — enables local-asset existence checks and unknown-module
+    detection."""
 
     # 1. Schema (with format checker: real dates, URIs, emails)
     with open(SCHEMA_PATH, encoding="utf-8") as f:
@@ -210,7 +224,8 @@ def run_checks(bundle_data, report, run_link_checks=True, refresh_links=False):
 
     # 2. Required business fields (beyond schema-required)
     for path, label in REQUIRED_FIELDS:
-        if get_path(bundle_data, path) in (None, "", []):
+        val = get_path(bundle_data, path)
+        if val in (None, "", [], {}) or (isinstance(val, dict) and not val):
             report.fail("required", f"missing {label} ({'/'.join(path)})")
         else:
             report.ok("required", f"{label} present")
@@ -280,16 +295,41 @@ def run_checks(bundle_data, report, run_link_checks=True, refresh_links=False):
                 else:
                     report.warn("links", f"{detail} · {loc}: {url}")
 
-    # 5. Assets (local paths referenced in the bundle)
-    asset_refs = []
-    for path, url in collect_urls(bundle_data):
-        if not url.startswith(("http://", "https://")) and url:
-            asset_refs.append((path, url))
-    if asset_refs:
-        for path, ref in asset_refs:
-            report.fail("assets", f"non-URL asset reference not yet supported: {'/'.join(path)} = {ref}")
-    else:
+    # 5. Local assets (fields that may reference a local file path)
+    missing_assets = []
+    for path in ASSET_FIELDS:
+        val = get_path(bundle_data, path)
+        if val and not val.startswith(("http://", "https://")):
+            if tdir and os.path.exists(os.path.join(tdir, val)):
+                report.ok("assets", f"local asset exists: {'/'.join(path)} = {val}")
+            elif tdir:
+                missing_assets.append(f"{'/'.join(path)} = {val}")
+                report.fail("assets", f"local asset file missing: {'/'.join(path)} = {val} "
+                                      f"(looked in {tdir})")
+            else:
+                report.warn("assets", f"local asset reference cannot be verified "
+                                      f"without tournament dir: {'/'.join(path)} = {val}")
+    has_local_asset = False
+    for p in ASSET_FIELDS:
+        v = get_path(bundle_data, p)
+        if v and not v.startswith(("http://", "https://")):
+            has_local_asset = True
+            break
+    if not missing_assets and not has_local_asset:
         report.ok("assets", "no local asset references (all URLs are remote)")
+
+    # 6. Unknown module files (typo'd module names must not silently vanish)
+    if tdir and os.path.isdir(tdir):
+        registered = {f for f, _k, _r in MODULE_REGISTRY}
+        unknown = sorted(
+            f for f in os.listdir(tdir)
+            if f.endswith(".json") and f not in registered and f not in KNOWN_NON_MODULES
+        )
+        if unknown:
+            report.warn("modules", f"unrecognized .json files in tournament dir (ignored): "
+                                   f"{', '.join(unknown)}")
+        else:
+            report.ok("modules", "all module files recognized")
 
 
 def main():
@@ -305,18 +345,25 @@ def main():
         with open(args.bundle, encoding="utf-8") as f:
             bundle = json.load(f)
         report_title = f"bundle {args.bundle}"
+        tdir = None
     elif args.tournament:
-        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
-        from compile import compile_bundle, tournament_dir
-        org, slug = args.tournament.split("/", 1)
-        tdir = tournament_dir(org, slug)
-        bundle, used = compile_bundle(tdir)
+        from compile import compile_bundle
+        try:
+            org, slug = parse_tournament_id(args.tournament)
+            tdir = tournament_dir(org, slug)
+            if not os.path.isdir(tdir):
+                raise PlatformError(f"no tournament dir at {tdir}")
+            bundle, used, _unknown = compile_bundle(tdir)
+        except PlatformError as e:
+            print(f"VALIDATION ERROR: {e}", file=sys.stderr)
+            sys.exit(e.exit_code)
         report_title = f"{org}/{slug} ({len(used)} modules)"
     else:
         ap.error("provide <org>/<slug> or --bundle <path>")
 
     report = Report()
-    run_checks(bundle, report, run_link_checks=not args.no_links, refresh_links=args.refresh_links)
+    run_checks(bundle, report, run_link_checks=not args.no_links,
+               refresh_links=args.refresh_links, tdir=tdir)
 
     if args.json:
         print(json.dumps({"title": report_title, **report.to_dict()}, indent=2))

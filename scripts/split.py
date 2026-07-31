@@ -1,55 +1,30 @@
 #!/usr/bin/env python3
-"""One-time migration: split the app's data.json into per-module content files.
-
-Reads a compiled bundle (e.g. the current app data.json) and writes module
-files under orgs/<org>/tournaments/<slug>/ so the compile pipeline can
-reproduce the bundle byte-for-byte from modules.
+"""One-time migration tool: split a compiled bundle (e.g. the app's
+data.json) into per-module content files.
 
 Usage:
-    python3 scripts/split.py <bundle.json> <org> <slug> [--manifest-only]
+    python3 scripts/split.py <bundle.json> <org> <slug>
 
-Writes:
-    <repo>/orgs/<org>/tournaments/<slug>/
-        manifest.json      (metadata, not compiled into the bundle)
-        sport.json         sport + sportConfig
-        tournament.json    tournament
-        team.json          team
-        venue.json         venue
-        schedule.json      games + scheduleStatus + scheduleExpected
-        hotels.json        hotels
-        weather.json       weather
-        rules.json         rules
-        updates.json       updates
-        contacts.json      contacts
-        venue-rules.json   venueRules
-        checklist.json     checklist
-        nearby.json        nearby
-        offline.json       offline
+Writes orgs/<org>/tournaments/<slug>/ — one module file per registered
+module (see pipeline.MODULE_REGISTRY) plus manifest.json metadata.
+
+This is migration tooling, not a daily command — use scripts/guide.py for
+day-to-day operations.
 """
 
+import argparse
 import json
 import os
 import sys
 from datetime import datetime, timezone
 
-# Canonical bundle key order (matches the app contract v1).
-# (module_filename, [top-level keys contributed by that module])
-MODULE_ORDER = [
-    ("sport.json",        ["sport", "sportConfig"]),
-    ("tournament.json",   ["tournament"]),
-    ("team.json",         ["team"]),
-    ("venue.json",        ["venue"]),
-    ("schedule.json",     ["games", "scheduleStatus", "scheduleExpected"]),
-    ("hotels.json",       ["hotels"]),
-    ("weather.json",      ["weather"]),
-    ("rules.json",        ["rules"]),
-    ("updates.json",      ["updates"]),
-    ("contacts.json",     ["contacts"]),
-    ("venue-rules.json",  ["venueRules"]),
-    ("checklist.json",    ["checklist"]),
-    ("nearby.json",       ["nearby"]),
-    ("offline.json",      ["offline"]),
-]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pipeline import (  # noqa: E402
+    MODULE_REGISTRY,
+    PlatformError,
+    parse_tournament_id,
+    tournament_dir,
+)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -63,19 +38,23 @@ def dump_json(obj, path):
 
 
 def main():
-    if len(sys.argv) < 4:
-        print(__doc__)
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("bundle", help="path to a compiled data.json")
+    ap.add_argument("tournament", help="org/slug to write into")
+    args = ap.parse_args()
+
+    try:
+        org, slug = parse_tournament_id(args.tournament)
+        with open(args.bundle, encoding="utf-8") as f:
+            bundle = json.load(f)
+    except (PlatformError, OSError, json.JSONDecodeError) as e:
+        print(f"SPLIT ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    bundle_path, org, slug = sys.argv[1], sys.argv[2], sys.argv[3]
-    with open(bundle_path, encoding="utf-8") as f:
-        bundle = json.load(f)
-
-    tdir = os.path.join(REPO_ROOT, "orgs", org, "tournaments", slug)
+    tdir = tournament_dir(org, slug)
     os.makedirs(tdir, exist_ok=True)
 
-    # Split modules by key groups, preserving key order within each module.
-    for filename, keys in MODULE_ORDER:
+    for filename, keys, _required in MODULE_REGISTRY:
         module = {k: bundle[k] for k in keys if k in bundle}
         if not module:
             print(f"  skip {filename} (no keys present in bundle)")
@@ -83,21 +62,20 @@ def main():
         dump_json(module, os.path.join(tdir, filename))
         print(f"  wrote {filename}")
 
-    # Manifest: repo metadata only — never compiled into the bundle.
     manifest = {
         "org": org,
         "slug": slug,
         "schemaVersion": 1,
-        "status": "live",          # draft | staging | live | complete
+        "status": "draft",  # split output must be explicitly promoted to live
         "sport": bundle.get("sport", ""),
         "name": bundle.get("tournament", {}).get("name", slug),
         "shortName": bundle.get("tournament", {}).get("shortName", ""),
         "dates": bundle.get("tournament", {}).get("dates", {}),
-        "compiledFrom": os.path.basename(bundle_path),
+        "compiledFrom": os.path.basename(args.bundle),
         "createdAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     dump_json(manifest, os.path.join(tdir, "manifest.json"))
-    print(f"  wrote manifest.json")
+    print(f"  wrote manifest.json (status: draft — set to 'live' to publish)")
     print(f"\nDone. Modules in {tdir}")
 
 

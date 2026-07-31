@@ -2,20 +2,16 @@
 """Compile tournament module files into the app bundle (data.json).
 
 This is the heart of the tournament platform: module JSON files → the exact
-bundle shape the Sporting Jax Guide PWA already consumes. Byte-identical
-output for unchanged content (verified against the v1 contract).
+bundle shape the Sporting Jax Guide PWA already consumes. Semantically
+identical output for unchanged content (verified against the v1 contract).
 
 Usage:
-    python3 scripts/compile.py <org>/<slug> [--out <path>] [--with-meta]
+    python3 scripts/compile.py <org>/<slug> [--out <path>]
 
-    --with-meta  adds a "meta" block (buildId, compiledAt, dataStatus) to the
-                 bundle. The app ignores unknown keys, but the v1 contract
-                 check compares bundles without meta — omit for byte-identical
-                 reproduction.
-
-Module files are optional: a tournament without hotels.json simply has no
-"hotels" key in the bundle. The app renders empty/absent sections gracefully
-(its empty-state design), and validation reports missing modules.
+Module files are optional (per MODULE_REGISTRY): a tournament without
+hotels.json simply has no "hotels" key in the bundle. Unknown .json files in
+the tournament directory (e.g. a typo'd "hotel.json") are reported as
+warnings so silent content omission can't happen.
 
 Canonical key order (app contract v1):
     sport, sportConfig, tournament, team, venue, games, scheduleStatus,
@@ -28,28 +24,17 @@ import hashlib
 import json
 import os
 import sys
-from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pipeline import (  # noqa: E402
+    EXIT_CONFIG,
+    MODULE_REGISTRY,
+    PlatformError,
+    parse_tournament_id,
+    tournament_dir,
+)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Canonical bundle key order = app contract v1.
-# (module_filename, [top-level keys contributed by that module])
-MODULE_ORDER = [
-    ("sport.json",        ["sport", "sportConfig"]),
-    ("tournament.json",   ["tournament"]),
-    ("team.json",         ["team"]),
-    ("venue.json",        ["venue"]),
-    ("schedule.json",     ["games", "scheduleStatus", "scheduleExpected"]),
-    ("hotels.json",       ["hotels"]),
-    ("weather.json",      ["weather"]),
-    ("rules.json",        ["rules"]),
-    ("updates.json",      ["updates"]),
-    ("contacts.json",     ["contacts"]),
-    ("venue-rules.json",  ["venueRules"]),
-    ("checklist.json",    ["checklist"]),
-    ("nearby.json",       ["nearby"]),
-    ("offline.json",      ["offline"]),
-]
 
 
 def load_json(path):
@@ -57,20 +42,24 @@ def load_json(path):
         return json.load(f)
 
 
-class CompileError(Exception):
-    """Raised for any content problem that should surface as an actionable
-    message rather than a raw traceback (e.g. in CI or a future admin UI)."""
+class CompileError(PlatformError):
+    """Content problem that should surface as an actionable message."""
 
-
-def tournament_dir(org, slug):
-    return os.path.join(REPO_ROOT, "orgs", org, "tournaments", slug)
+    def __init__(self, message):
+        super().__init__(message, exit_code=EXIT_CONFIG)
 
 
 def compile_bundle(tdir):
-    """Assemble the bundle dict from module files. Returns (bundle, used_modules)."""
+    """Assemble the bundle dict from module files.
+
+    Returns (bundle, used_modules, unknown_modules). Unknown modules are
+    .json files in the tournament dir that are neither registered modules
+    nor known metadata (manifest.json) — reported as warnings.
+    """
     bundle = {}
     used = []
-    for filename, keys in MODULE_ORDER:
+    unknown = []
+    for filename, keys, _required in MODULE_REGISTRY:
         path = os.path.join(tdir, filename)
         if not os.path.exists(path):
             continue
@@ -90,47 +79,48 @@ def compile_bundle(tdir):
                 )
             bundle[key] = module[key]
         used.append(filename)
-    return bundle, used
+
+    # Detect unrecognized .json files (typo'd module names, stray files)
+    from pipeline import KNOWN_NON_MODULES
+    registered = {f for f, _k, _r in MODULE_REGISTRY}
+    for fname in sorted(os.listdir(tdir)):
+        if fname.endswith(".json") and fname not in registered and fname not in KNOWN_NON_MODULES:
+            unknown.append(fname)
+
+    return bundle, used, unknown
 
 
 def serialize(obj):
-    """Serialize exactly like the v1 app bundle: 2-space indent, raw UTF-8."""
+    """Serialize exactly like the v1 app bundle: 2-space indent, raw UTF-8,
+    trailing newline."""
     return json.dumps(obj, indent=2, ensure_ascii=False) + "\n"
+
+
+def content_digest(text):
+    """Stable content identifier (not a security hash)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("tournament", help="org/slug, e.g. savannah-united/sporting-jax-2026")
     ap.add_argument("--out", help="output file (default: <repo>/out/<org>/<slug>/data.json)")
-    ap.add_argument("--with-meta", action="store_true", help="include meta block")
     args = ap.parse_args()
 
-    org, slug = args.tournament.split("/", 1)
-    tdir = tournament_dir(org, slug)
-    if not os.path.isdir(tdir):
-        print(f"ERROR: no tournament dir at {tdir}", file=sys.stderr)
-        sys.exit(1)
-
     try:
-        bundle, used = compile_bundle(tdir)
-    except CompileError as e:
+        org, slug = parse_tournament_id(args.tournament)
+        tdir = tournament_dir(org, slug)
+        if not os.path.isdir(tdir):
+            raise CompileError(f"no tournament dir at {tdir}")
+        bundle, used, unknown = compile_bundle(tdir)
+        if unknown:
+            print(f"WARNING: unrecognized .json files in tournament dir (ignored): "
+                  f"{', '.join(unknown)} — did you mean a registered module?",
+                  file=sys.stderr)
+        output = serialize(bundle)
+    except PlatformError as e:
         print(f"COMPILE ERROR: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if args.with_meta:
-        raw = serialize(bundle)
-        bundle = {
-            "meta": {
-                "schemaVersion": 1,
-                "tournamentId": f"{org}/{slug}",
-                "compiledAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "buildId": hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10],
-                "modules": used,
-            },
-            **bundle,
-        }
-
-    output = serialize(bundle)
+        sys.exit(e.exit_code)
 
     if args.out:
         out_path = args.out
@@ -142,8 +132,7 @@ def main():
 
     print(f"compiled {len(used)} modules → {out_path} ({len(output)} bytes)")
     print(f"  modules: {', '.join(used)}")
-    if not args.with_meta:
-        print(f"  sha1: {hashlib.sha1(output.encode('utf-8')).hexdigest()}")
+    print(f"  digest: {content_digest(output)}")
 
 
 if __name__ == "__main__":

@@ -5,104 +5,166 @@ lives here as structured module JSON files. The app shell (in the separate
 `sporting-jax-guide` repo) is **never** modified from this repo — it only
 consumes compiled bundles.
 
+## Quick start
+
+Requires **Python 3.11+**. Set up once:
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+Run tests:
+
+```bash
+.venv/bin/python -m pytest tests/
+```
+
+## The pipeline
+
+**Supported operator interface (one command, no Python knowledge needed):**
+
+```bash
+.venv/bin/python scripts/guide.py new <org>/<slug>          # scaffold from template (status: draft)
+.venv/bin/python scripts/guide.py check <org>/<slug>        # compile + validate → Guide Health Report
+.venv/bin/python scripts/guide.py preview <org>/<slug>      # check + dry-run publish diff
+.venv/bin/python scripts/guide.py publish <org>/<slug>      # check + status gate + publish
+.venv/bin/python scripts/guide.py list                      # tournaments + status
+```
+
+**Lower-level scripts** (same code, more knobs):
+
+```bash
+.venv/bin/python scripts/compile.py <org>/<slug>            # modules → out/<org>/<slug>/data.json
+.venv/bin/python scripts/validate.py <org>/<slug>           # Guide Health Report
+.venv/bin/python scripts/deploy.py <org>/<slug> --dry-run   # safe preview
+.venv/bin/python scripts/deploy.py <org>/<slug>             # publish
+.venv/bin/python scripts/split.py <bundle.json> <org>/<slug>  # migration: bundle → module files
+```
+
+**Exit codes (all commands):** `0` success/no-op · `1` validation blocked ·
+`2` config/usage error · `3` publish/git failure · `4` external dependency.
+
+## Layout
+
 ```
 orgs/<org>/tournaments/<slug>/     one folder per tournament
-  manifest.json                     metadata (org, slug, schemaVersion, status)
-  sport.json                        sport + sportConfig (labels)
-  tournament.json                   name, dates, organizer
-  team.json                         team name, colors, logo
-  venue.json                        venue, fields, parking, amenities
-  schedule.json                     games + scheduleStatus + scheduleExpected
-  hotels.json                       stay-to-play + official/non-official
-  weather.json                      summary, details, forecastLink
-  rules.json                        fullLink, keyRules, tiebreakers
-  updates.json                      parent-facing update feed
-  contacts.json                     manager, coach, staff, tournament director
-  venue-rules.json                  tents, pets, food/cooler, chairs, etc.
-  checklist.json                    player/weather/parent/emergency lists
-  nearby.json                       urgent care, stores, food, errands
-  offline.json                      PDF guide URL, cache metadata
-
+  manifest.json                     REQUIRED metadata (org, slug, schemaVersion,
+                                    status: draft|live). No manifest → no publish.
+  sport.json · tournament.json · team.json · venue.json · schedule.json
+  hotels.json · weather.json · rules.json · updates.json · contacts.json
+  venue-rules.json · checklist.json · nearby.json · offline.json
 _targets.json                       org/slug → app repo publish target mapping
-_schemas/                           JSON Schema contracts (versioned)
-  bundle-v1.json                    the compiled data.json contract (v1)
-scripts/                            the build pipeline
-  split.py                          one-time: bundle → module files
-  compile.py                        module files → bundle (data.json)
-  validate.py                       Guide Health Report (schema/required/consistency/links/assets)
-  deploy.py                         compile + validate + publish to target app repo
+_schemas/bundle-v1.json             the compiled data.json contract (v1)
+scripts/                            pipeline (compile, validate, deploy, split, guide)
+tests/                              pytest suite (37 tests, throwaway git repos)
 out/                                compiled bundles + link cache (gitignored)
 ```
 
-## The pipeline (one command)
-
-```bash
-.venv/bin/python scripts/compile.py <org>/<slug>          # → out/<org>/<slug>/data.json
-.venv/bin/python scripts/validate.py <org>/<slug>         # Guide Health Report
-.venv/bin/python scripts/deploy.py <org>/<slug> --dry-run # compile+validate+diff (safe)
-.venv/bin/python scripts/deploy.py <org>/<slug>           # publish (commit+push to target)
-```
-
-- Validation **blocks** publish on: schema errors (including real calendar
-  dates and URI/email formats), missing business-required fields, games
-  outside the tournament window, scheduleStatus/games contradictions, bad
-  hotel drive formats, dead **critical** links (venue map, field map, hotel
-  portal, rules doc, urgent care).
-- **Status gate:** a tournament whose `manifest.json` status is not `live`
-  cannot be published (use `--allow-draft` to override). Draft content never
-  reaches parents by accident.
-- **Publish targets:** `_targets.json` maps each tournament to its app repo
-  (repo, file path, local git working copy). Any number of tournaments/apps
-  can be published; the mapping is data, not code.
-- **Deploy safety:** the pipeline fetches `origin`, compares the compiled
-  bundle **semantically** (JSON equality) against `origin/main`'s data.json,
-  and only commits+publishes when content actually changed. Every git
-  return code is checked — a failed push is reported as a failure, and local
-  HEAD is verified against origin/main after push. A dead/failed publish
-  never touches the app, and never *claims* success it didn't achieve.
-- The app shell is never touched: deploy writes only the target `appPath`
-  file (data.json) into the app repo.
-
 ## Editing content (non-technical path)
 
-Edit a module file (e.g. `hotels.json`) → run `deploy.py --dry-run` → review
-the Guide Health Report → run `deploy.py` to publish. The compiled bundle is
-semantically identical in structure to what the app already consumes; the app
-parses JSON, so whitespace formatting of the bundle is canonical (2-space,
-raw UTF-8) and not required to match the old hand-compacted file byte-for-byte.
+Edit a module file (e.g. `hotels.json`) → `guide.py check` → review the
+Guide Health Report → `guide.py preview` → `guide.py publish`. The compiled
+bundle is semantically identical in structure to what the app consumes; the
+app parses JSON, so whitespace formatting is canonical (2-space, raw UTF-8)
+and not required to match the old hand-compacted file byte-for-byte.
 
 ## Adding a new tournament
 
-1. Copy an existing tournament folder (e.g. `sporting-jax-2026`) to
-   `orgs/<org>/tournaments/<new-slug>/`.
-2. Update `manifest.json` (slug, name, dates, status: `draft`) and every module file.
-3. Delete module files the tournament doesn't need (optional modules).
-4. Add a publish target to `_targets.json` (repo + appPath + workDir).
-5. Run `compile.py` + `validate.py` — the Guide Health Report tells you what's missing.
-6. Set status to `live`, then `deploy.py` to publish.
+1. `guide.py new <org>/<slug>` — scaffolds from the template, status **draft**.
+2. Edit the module files; delete modules the tournament doesn't need.
+3. Add a publish target to `_targets.json` (see below).
+4. `guide.py check` — the report tells you what's missing.
+5. Set `manifest.json` status to `live`, then `guide.py publish`.
+
+## Publish targets & deploy safety
+
+`_targets.json` maps each tournament to its app repo — logical routing only:
+
+```json
+{
+  "savannah-united/sporting-jax-2026": {
+    "repo": "rrouleau-x/sporting-jax-guide",
+    "appPath": "app/data.json",
+    "workDir": "/tmp/sporting-jax-guide",
+    "mirrorTo": "~/.hermes/www/app/data.json"
+  }
+}
+```
+
+`workDir`/`mirrorTo` are machine-specific; override per environment with
+`TOURNAMENT_WORKDIR` / `TOURNAMENT_MIRROR` env vars so the repo stays
+portable across machines/CI runners.
+
+Deploy is **transactional** — each guarantee is enforced in code and covered
+by tests (`tests/test_deploy.py`):
+
+- **Clean worktree required.** A staged or uncommitted change in the app
+  repo (e.g. a pre-staged index.html) aborts the deploy before anything is
+  written — a shell change can never ride along in the publish commit.
+- **Explicit pathspec commit.** Only the target `appPath` file is added and
+  committed (`git commit -- app/data.json`); the staged diff is verified to
+  contain exactly that one path.
+- **Manifest + status gate.** `manifest.json` is REQUIRED; status must be
+  explicitly `live` (`--allow-draft` overrides). Missing manifest, missing
+  status, or unknown status = exit 2 — the gate can't be skipped by deleting
+  metadata.
+- **Semantic diff vs origin/main.** The pipeline fetches `origin` and
+  compares the compiled bundle by JSON equality against `origin/main`'s
+  data.json. No content change → no commit, no push, exit 0.
+- **Mirror after success.** `mirrorTo` is written (temp file + atomic
+  replace) only after push verification succeeds (local HEAD == origin/main).
+- **Rollback on failure.** Pre-push failures reset the worktree to its
+  starting state; push failures report exact recovery instructions and never
+  touch the mirror. Every git return code is checked — a failed publish is
+  never reported as success.
+
+**The app shell is never touched:** deploy writes only the target `appPath`
+file (data.json) into the app repo. If the backend dies, parents keep the
+last published guide.
+
+## Validation
+
+`guide.py check` / `validate.py` produce a Guide Health Report. Blocking
+failures (exit 1) prevent publish:
+
+- Schema conformance to `_schemas/bundle-v1.json` — including real calendar
+  dates (format checker) and URI/email formats
+- Required business fields (team manager + coach contacts)
+- Consistency: scheduleStatus/games contradictions, hotel drive format
+- Games within the tournament window
+- Local asset files exist
+- Unknown module files reported (typo'd `hotel.json` can't silently vanish)
+- Links: every URL checked (6h cache, parallel); **critical** links (venue
+  map, field map, hotel portal, rules doc, urgent care) must resolve —
+  others warn
+
+`validate.py --json` emits structured output for the future admin dashboard.
 
 ## Contracts & schema evolution
 
-- `_schemas/bundle-v1.json` is the authoritative contract between content and
-  app. The app ignores unknown keys, so the contract is additive.
+- `_schemas/bundle-v1.json` is the authoritative contract between content
+  and app. The app ignores unknown keys, so the contract is additive.
 - Module files are optional: no `sponsors.json` → no sponsors section.
 - Keep dates ISO (`2026-08-22`), drives as `"X mi · ~Y min"`.
-- **Schema migration:** `schemaVersion` (manifest + bundle meta) is the hook
-  for contract evolution. v1→v2 plan: ship the new schema alongside the old
-  (`bundle-v2.json`), compile both while the app supports both, then drop v1
-  once no live tournament uses it. validate.py validates against the version
-  declared by the tournament — never guess.
+- **Schema migration (future plan):** `schemaVersion` (manifest) is the hook
+  for contract evolution. When v2 is real: ship `bundle-v2.json` alongside
+  v1, add a version registry in the validator keyed by manifest
+  `schemaVersion`, compile both while the app supports both, then drop v1
+  once no live tournament uses it. Today the validator always loads v1 —
+  the version registry is not yet implemented.
 
 ## Roadmap (from the Phase 1 design doc)
 
-- **Phase 2:** admin UI (wizard + module forms + validation dashboard
-  consuming `validate.py --json`), AI-assisted content generation (hotel
-  research, schedule import, rules extraction). AI drafts land on a branch /
-  `status: draft` and require human review before `live`.
+- **Phase 2:** admin UI (wizard + module forms + dashboard consuming
+  `validate.py --json`), AI-assisted content generation (hotel research,
+  schedule import, rules extraction). AI drafts land `status: draft` +
+  human review before `live`.
+- **Revision model:** `status` is lifecycle state today; a revision/approval
+  model (draft → in_review → approved → published, tied to content digest)
+  is the Phase 2 upgrade path — the status gate stays as the Phase 1 rail.
 - **Team-specific content:** per-team compiled bundles (`data-<team>.json`),
-  selected via `?team=` — avoids duplicating whole tournament folders.
-- **Concurrency:** multiple admins/AI agents write via branches + PR review
-  (git already gives us diff/revert/audit); a review gate independent of
-  "passes schema" is required before AI autofill touches deploy.
+  selected via `?team=`.
+- **Concurrency:** branches + PR review for multiple admins/AI agents.
 - **CI:** `validate every tournament on push` workflow is ready (see
   `tournament-companion-pwa` skill) — needs a workflow-scoped PAT to commit.

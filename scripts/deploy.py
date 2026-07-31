@@ -1,35 +1,30 @@
 #!/usr/bin/env python3
 """Compile + validate + publish a tournament bundle to its target app repo.
 
-Multi-tournament aware: each tournament maps to a publish target via
-_targets.json at the repo root:
+Transactional safety (per external design review):
+  - worktree must be CLEAN before anything is written — a staged app-shell
+    change can never ride along in the publish commit
+  - commit uses an explicit pathspec (git commit -- app/data.json) and the
+    proposed commit diff is verified to contain exactly one permitted path
+  - manifest.json is REQUIRED and status must be explicitly 'live'
+    (missing manifest / missing status / unknown status = exit 2, never
+    silently skipped)
+  - the mirror is updated only AFTER push verification succeeds, via a
+    temporary file + atomic replace
+  - original file + starting HEAD are saved; pre-push failures restore the
+    worktree; push failures print exact recovery instructions and never
+    touch the mirror
+  - every git return code is checked; local HEAD is verified == origin/main
+    after push — a failed publish is never reported as success
 
-    {
-      "<org>/<slug>": {
-        "repo": "rrouleau-x/sporting-jax-guide",   # GitHub repo (owner/name)
-        "appPath": "app/data.json",                 # file inside the repo to replace
-        "workDir": "/tmp/sporting-jax-guide",       # local git working copy
-        "mirrorTo": "~/.hermes/www/app/data.json"   # optional extra local copy
-      }
-    }
-
-The app shell (index.html, sw.js, manifest.json) is NEVER touched — only the
-appPath file (data.json) is replaced, and only when content actually changed
-(semantic JSON comparison against origin/main after a fetch).
-
-Safety rails:
-  - validation must pass (blocking failures abort; shared run_checks() path)
-  - manifest status must be "live" (use --allow-draft to override)
-  - workDir is verified: exists, right remote, right branch, clean-ish
-  - git fetch happens before diffing; every git command's return code is
-    checked — a failed push is reported as failure, never as success
-  - --dry-run performs compile + validate + diff but never writes or pushes
+Exit codes (see platform.py contract):
+  0 success/no-op · 1 validation blocked · 2 config/usage · 3 publish/git
+  4 external dependency (network)
 
 Usage:
     python3 scripts/deploy.py <org>/<slug> [--dry-run] [--no-links]
-                              [--allow-draft] [--message "..."]
-
-Exit codes: 0 = published/no-op · 1 = validation blocked · 2 = setup/error
+                              [--refresh-links] [--allow-draft]
+                              [--message "..."] [--json] [--quiet]
 """
 
 import argparse
@@ -39,52 +34,251 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TARGETS_PATH = os.path.join(REPO_ROOT, "_targets.json")
-
-sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from compile import compile_bundle, content_digest, serialize  # noqa: E402
+from pipeline import (  # noqa: E402
+    EXIT_BLOCKED,
+    EXIT_CONFIG,
+    EXIT_DEPENDENCY,
+    EXIT_OK,
+    EXIT_PUBLISH,
+    PlatformError,
+    check_publish_status,
+    parse_tournament_id,
+    resolve_target,
+    tournament_dir,
+)
+from validate import Report, run_checks  # noqa: E402
 
 
 def run(cmd, cwd=None):
-    """Run a command; return (returncode, stdout, stderr)."""
     r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
 
-def die(code, msg):
-    print(f"ERROR: {msg}", file=sys.stderr)
-    sys.exit(code)
+class DeployResult:
+    def __init__(self, status, message, exit_code, tournament, digest=None,
+                 changed=False, blocking=0, warnings=0, destination=None):
+        self.status = status            # noop | dryrun | published | blocked | error
+        self.message = message
+        self.exit_code = exit_code
+        self.tournament = tournament
+        self.digest = digest
+        self.changed = changed
+        self.blocking = blocking
+        self.warnings = warnings
+        self.destination = destination
 
-
-def load_targets():
-    if not os.path.exists(TARGETS_PATH):
-        die(2, f"no {TARGETS_PATH} — add a publish target for this tournament")
-    with open(TARGETS_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    def to_dict(self):
+        return {
+            "status": self.status,
+            "message": self.message,
+            "exit_code": self.exit_code,
+            "tournament": self.tournament,
+            "digest": self.digest,
+            "changed": self.changed,
+            "blocking": self.blocking,
+            "warnings": self.warnings,
+            "destination": self.destination,
+        }
 
 
 def verify_workdir(target):
-    """Verify the local git working copy is the right repo, on main, usable."""
+    """Verify the local git working copy: exists, right repo, main branch,
+    and — critically — a CLEAN worktree and index. A staged or unstaged
+    change (e.g. a pre-staged index.html) must abort the deploy."""
     workdir = os.path.expanduser(target.get("workDir", ""))
     if not workdir or not os.path.isdir(workdir):
-        die(2,
+        raise PlatformError(
             f"workDir '{workdir or '(not set)'}' missing. Clone the app repo:\n"
-            f"  git clone https://github.com/{target['repo']}.git {workdir}")
+            f"  git clone https://github.com/{target['repo']}.git {workdir}",
+            exit_code=EXIT_CONFIG)
     rc, out, err = run(["git", "remote", "get-url", "origin"], cwd=workdir)
-    if rc != 0 or target["repo"] not in (out or ""):
-        die(2, f"workDir {workdir} is not the {target['repo']} repo "
-               f"(origin: {out or err or 'unknown'})")
+    origin_url = out or err or "unknown"
+    # Accept either the expected GitHub repo (owner/name appears in URL) or a
+    # local filesystem path origin (tests, local workflows).
+    repo_ok = target["repo"] in origin_url or origin_url.startswith(("/", ".", "file://"))
+    if rc != 0 or not repo_ok:
+        raise PlatformError(
+            f"workDir {workdir} is not the {target['repo']} repo "
+            f"(origin: {origin_url})", exit_code=EXIT_CONFIG)
     rc, out, _ = run(["git", "branch", "--show-current"], cwd=workdir)
     if rc != 0 or out != "main":
-        die(2, f"workDir {workdir} is on branch '{out or '?'}' — expected 'main'")
+        raise PlatformError(
+            f"workDir {workdir} is on branch '{out or '?'}' — expected 'main'",
+            exit_code=EXIT_CONFIG)
+    rc, out, _ = run(["git", "status", "--porcelain"], cwd=workdir)
+    if rc != 0:
+        raise PlatformError(f"git status failed in {workdir}", exit_code=EXIT_PUBLISH)
+    if out:
+        raise PlatformError(
+            f"workDir {workdir} is NOT clean — deploy would risk committing "
+            f"pre-staged or uncommitted files (e.g. an app-shell change):\n"
+            f"{out}\n"
+            f"Commit or stash those changes first (this is the sacred-shell "
+            f"guard).", exit_code=EXIT_CONFIG)
     return workdir
 
 
 def remote_bundle(workdir, app_path):
-    """Return the data.json content at origin/main, or None if absent."""
     rc, out, _ = run(["git", "show", f"origin/main:{app_path}"], cwd=workdir)
     return out if rc == 0 else None
+
+
+def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
+                      refresh_links=False, allow_draft=False, message=None,
+                      targets=None, workdir_override=None, tdir=None):
+    """Full deploy pipeline. Returns a DeployResult; never raises for
+    expected outcomes. Raises PlatformError only for config problems.
+    tdir may be overridden (tests use scratch tournament copies)."""
+    org, slug = parse_tournament_id(tournament)
+    tdir = tdir or tournament_dir(org, slug)
+    if not os.path.isdir(tdir):
+        raise PlatformError(f"no tournament dir at {tdir}")
+
+    # 1. Compile
+    bundle, used, unknown = compile_bundle(tdir)
+    output = serialize(bundle)
+    digest = content_digest(output)
+    bundle_data = json.loads(output)
+
+    # 2. Validate — shared run_checks() path
+    report = Report()
+    run_checks(bundle_data, report, run_link_checks=run_link_checks,
+               refresh_links=refresh_links, tdir=tdir)
+    blocking = report.blocking()
+    summary = report.summary()
+    if blocking:
+        return DeployResult(
+            "blocked", "validation failed — see Guide Health Report",
+            EXIT_BLOCKED, tournament, digest=digest, changed=False,
+            blocking=summary["blocking"], warnings=summary["warnings"])
+
+    # 3. Status gate — manifest REQUIRED, status explicitly live
+    status_msg = check_publish_status(tdir, allow_draft=allow_draft)
+
+    # 4. Verify target + worktree
+    target = resolve_target(tournament, targets=targets)
+    workdir = workdir_override or verify_workdir(target)
+    app_path = target["appPath"]
+    git_data = os.path.join(workdir, *app_path.split("/"))
+
+    # 5. Fetch + semantic diff vs origin/main
+    rc, _, err = run(["git", "fetch", "origin"], cwd=workdir)
+    if rc != 0:
+        raise PlatformError(f"git fetch failed in {workdir}: {err or 'unknown error'}",
+                            exit_code=EXIT_PUBLISH)
+    remote = remote_bundle(workdir, app_path)
+    if remote is None:
+        changed = True
+        diff_note = "no previous bundle at origin/main — initial publish"
+    else:
+        try:
+            live = json.loads(remote)
+            changed = live != bundle_data
+        except json.JSONDecodeError:
+            changed = True
+            diff_note = "remote data.json unreadable — treating as change"
+        else:
+            diff_note = ("content differs" if changed
+                         else "semantically identical — no content change")
+
+    # 6. Dry-run or no-op
+    if dry_run or not changed:
+        status = "dryrun" if dry_run and changed else "noop"
+        msg = (f"(dry-run) would write {app_path} in {workdir} and push to "
+               f"{target['repo']}" if status == "dryrun"
+               else "nothing to publish — app repo untouched")
+        return DeployResult(status, msg, EXIT_OK, tournament, digest=digest,
+                            changed=changed, warnings=summary["warnings"],
+                            destination=f"{target['repo']}/{app_path}")
+
+    # 7. Publish — transactionally
+    # Save starting HEAD for rollback (worktree was verified clean, so a
+    # hard reset to this commit fully restores file + index + branch).
+    rc, start_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
+    start_head = start_head if rc == 0 else None
+
+    try:
+        os.makedirs(os.path.dirname(git_data), exist_ok=True)
+        with open(git_data, "w", encoding="utf-8") as f:
+            f.write(output)
+
+        # Explicit pathspec — never `git add -A`
+        rc, _, err = run(["git", "add", "--", app_path], cwd=workdir)
+        if rc != 0:
+            raise PlatformError(f"git add failed: {err}", exit_code=EXIT_PUBLISH)
+
+        # Verify the staged diff contains EXACTLY the permitted path
+        rc, staged, _ = run(["git", "diff", "--cached", "--name-only"], cwd=workdir)
+        if rc != 0 or staged != app_path:
+            raise PlatformError(
+                f"staged diff is not exactly '{app_path}' — got: {staged or '(empty)'}. "
+                f"Aborting to protect the app shell.", exit_code=EXIT_PUBLISH)
+
+        msg = message or f"data: publish {slug} bundle (digest {digest[:10]})"
+        rc, _, err = run(["git", "commit", "-m", msg, "--", app_path], cwd=workdir)
+        if rc != 0:
+            raise PlatformError(f"git commit failed: {err} (nothing was pushed)",
+                                exit_code=EXIT_PUBLISH)
+
+        rc, _, err = run(["git", "push", "origin", "main"], cwd=workdir)
+        if rc != 0:
+            raise PlatformError(
+                f"git push FAILED: {err}\n"
+                f"The local worktree has been rolled back to its starting state "
+                f"and the mirror was NOT updated. Fix the push problem "
+                f"(auth, remote URL, branch protection) and re-run deploy.",
+                exit_code=EXIT_PUBLISH)
+
+        # Post-push verification: local HEAD must equal origin/main
+        rc, local_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
+        rc2, remote_head, _ = run(["git", "rev-parse", "origin/main"], cwd=workdir)
+        if rc != 0 or rc2 != 0 or local_head != remote_head:
+            raise PlatformError(
+                "push reported ok but local HEAD ≠ origin/main — check the repo "
+                "manually before trusting publication.", exit_code=EXIT_PUBLISH)
+
+        # SUCCESS — only now update the mirror, atomically
+        mirror = target.get("mirrorTo")
+        if mirror:
+            mirror_path = os.path.expanduser(mirror)
+            os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(mirror_path),
+                                       prefix=".data.json.tmp.")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(output)
+                os.replace(tmp, mirror_path)
+            except BaseException:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+                raise
+
+        return DeployResult(
+            "published", f"published {digest[:10]} → {target['repo']}/{app_path}",
+            EXIT_OK, tournament, digest=digest, changed=True,
+            warnings=summary["warnings"],
+            destination=f"{target['repo']}/{app_path}")
+    except PlatformError:
+        # Pre-push failure → roll back to starting state, never touch mirror
+        _restore_worktree(workdir, start_head)
+        raise
+    except BaseException:
+        _restore_worktree(workdir, start_head)
+        raise
+
+
+def _restore_worktree(workdir, start_head):
+    """Roll back a failed publish to the starting state. The worktree was
+    verified clean before the deploy, so a hard reset to the starting HEAD
+    fully restores file + index + branch."""
+    if start_head:
+        run(["git", "reset", "--hard", start_head], cwd=workdir)
+    else:
+        run(["git", "reset", "HEAD", "--", "."], cwd=workdir)
 
 
 def main():
@@ -95,122 +289,27 @@ def main():
     ap.add_argument("--refresh-links", action="store_true")
     ap.add_argument("--allow-draft", action="store_true")
     ap.add_argument("--message", default=None, help="git commit message")
+    ap.add_argument("--json", action="store_true", help="structured output")
+    ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
-    org, slug = args.tournament.split("/", 1)
-    targets = load_targets()
-    if args.tournament not in targets:
-        die(2, f"no publish target for '{args.tournament}' in {TARGETS_PATH} — "
-               f"add one, e.g. {{\"{args.tournament}\": {{\"repo\": \"...\", "
-               f"\"appPath\": \"app/data.json\", \"workDir\": \"...\"}}}}")
-    target = targets[args.tournament]
-
-    # 1. Compile (clean, actionable errors)
-    from compile import CompileError, compile_bundle, serialize, tournament_dir
-    tdir = tournament_dir(org, slug)
     try:
-        bundle, used = compile_bundle(tdir)
-    except CompileError as e:
-        die(1, f"compile: {e}")
-    output = serialize(bundle)
-    digest = hashlib.sha1(output.encode("utf-8")).hexdigest()
-    print(f"[1/5] compiled {len(used)} modules → sha1 {digest[:10]}")
+        result = deploy_tournament(
+            args.tournament,
+            dry_run=args.dry_run,
+            run_link_checks=not args.no_links,
+            refresh_links=args.refresh_links,
+            allow_draft=args.allow_draft,
+            message=args.message,
+        )
+    except PlatformError as e:
+        result = DeployResult("error", str(e), e.exit_code, args.tournament)
 
-    # 2. Validate — shared run_checks() path (same code the CLI uses)
-    from validate import Report, run_checks
-    bundle_data = json.loads(output)
-    report = Report()
-    run_checks(bundle_data, report,
-               run_link_checks=not args.no_links,
-               refresh_links=args.refresh_links)
-    print(report.render())
-    blocking = report.blocking()
-    if blocking:
-        print(f"\nDEPLOY ABORTED — {len(blocking)} blocking issue(s).")
-        sys.exit(1)
-    print("[2/5] validation passed (0 blocking)")
-
-    # 3. Status gate: drafts must not reach parents
-    manifest_path = os.path.join(tdir, "manifest.json")
-    if os.path.exists(manifest_path):
-        with open(manifest_path, encoding="utf-8") as f:
-            manifest = json.load(f)
-        status = manifest.get("status", "live")
-        if status != "live" and not args.allow_draft:
-            print(f"[3/5] DEPLOY BLOCKED — manifest status is '{status}', not 'live'. "
-                  f"Set status to 'live' to publish, or use --allow-draft.")
-            sys.exit(1)
-        print(f"[3/5] manifest status '{status}' — publish allowed")
-    else:
-        print(f"[3/5] no manifest.json (status gate skipped)")
-
-    # 4. Verify working copy + fetch + semantic diff vs origin/main
-    workdir = verify_workdir(target)
-    app_path = target["appPath"]
-    rc, out, err = run(["git", "fetch", "origin"], cwd=workdir)
-    if rc != 0:
-        die(2, f"git fetch failed in {workdir}: {err or out}")
-    print(f"[4/5] fetched origin in {workdir}")
-
-    remote = remote_bundle(workdir, app_path)
-    if remote is None:
-        changed = True
-        print(f"[4/5] no previous bundle at origin/main:{app_path} — initial publish")
-    else:
-        try:
-            live = json.loads(remote)
-            changed = live != bundle_data
-        except json.JSONDecodeError:
-            changed = True  # remote file unreadable → treat as change
-        if changed:
-            print(f"[4/5] bundle content differs from origin/main:{app_path} — change detected")
-        else:
-            print(f"[4/5] bundle semantically identical to origin/main:{app_path} — no content change")
-
-    if args.dry_run or not changed:
-        if changed:
-            print(f"[5/5] (dry-run) would write {app_path} in {workdir} and push to {target['repo']}")
-        else:
-            print("[5/5] (no-op) nothing to publish — app repo untouched")
-        print("DONE")
-        sys.exit(0)
-
-    # 5. Write, mirror, commit, push — every git return code checked
-    git_data = os.path.join(workdir, *app_path.split("/"))
-    os.makedirs(os.path.dirname(git_data), exist_ok=True)
-    with open(git_data, "w", encoding="utf-8") as f:
-        f.write(output)
-    print(f"[5/5] wrote {git_data} ({len(output)} bytes)")
-
-    mirror = target.get("mirrorTo")
-    if mirror:
-        mirror_path = os.path.expanduser(mirror)
-        os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
-        shutil.copyfile(git_data, mirror_path)
-        print(f"      mirrored to {mirror_path}")
-
-    msg = args.message or f"data: publish {slug} bundle (sha1 {digest[:10]})"
-    rc, _, err = run(["git", "add", app_path], cwd=workdir)
-    if rc != 0:
-        die(2, f"git add failed: {err}")
-    rc, out, err = run(["git", "commit", "-m", msg], cwd=workdir)
-    if rc != 0:
-        die(2, f"git commit failed: {err or out} (nothing was pushed)")
-    print(f"      commit: {out.splitlines()[-1] if out else 'ok'}")
-
-    rc, out, err = run(["git", "push", "origin", "main"], cwd=workdir)
-    if rc != 0:
-        die(2, f"git push FAILED — commit exists locally but is NOT on GitHub: {err or out}")
-    print(f"      push: {out.splitlines()[-1] if out else 'ok'}")
-
-    # Post-push verification: local HEAD must match remote
-    rc, local_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
-    rc2, remote_head, _ = run(["git", "rev-parse", "origin/main"], cwd=workdir)
-    if rc == 0 and rc2 == 0 and local_head == remote_head:
-        print("      verified: local HEAD == origin/main")
-        print("DONE — published to GitHub (Pages CDN ~1-2 min)")
-        sys.exit(0)
-    die(2, "push reported ok but local HEAD ≠ origin/main — check the repo manually")
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    elif not args.quiet:
+        print(result.message)
+    sys.exit(result.exit_code)
 
 
 if __name__ == "__main__":

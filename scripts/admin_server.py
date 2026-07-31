@@ -299,13 +299,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
-        if path == "/" or path == "/index.html":
-            fpath = os.path.realpath(os.path.join(UI_DIR, "index.html"))
-            # Serve ONLY index.html — containment enforced, nothing else.
+        # Serve ONLY the fixed UI allowlist (index.html, app.css, app.js)
+        # with realpath containment — no arbitrary file reads.
+        if path in ("/", "/index.html"):
+            fname = "index.html"
+        elif path.startswith("/static/"):
+            fname = path[len("/static/"):]
+            if fname not in ("app.css", "app.js"):
+                return self._send(404, {"Content-Type": "text/plain"}, b"not found")
+        else:
+            fname = None
+        if fname:
+            fpath = os.path.realpath(os.path.join(UI_DIR, fname))
             if os.path.commonpath([fpath, UI_DIR]) != UI_DIR or not os.path.isfile(fpath):
                 return self._send(404, {"Content-Type": "text/plain"}, b"not found")
+            ctype = ("text/html; charset=utf-8" if fname.endswith(".html")
+                     else "text/css" if fname.endswith(".css")
+                     else "application/javascript; charset=utf-8")
             with open(fpath, "rb") as f:
-                return self._send_csp(200, {"Content-Type": "text/html; charset=utf-8"}, f.read())
+                return self._send_csp(200, {"Content-Type": ctype}, f.read())
         if not path.startswith("/api/"):
             return self._send(*api_err("not found", 404))
         if not self._guard_api():
@@ -476,6 +488,7 @@ class Handler(BaseHTTPRequestHandler):
                     audit(self._actor(), "approve", tournament, digest=result["digest"])
                     return api_ok(result)
                 except PlatformError as e:
+                    audit(self._actor(), "approve.failed", tournament, detail=str(e)[:200])
                     return api_ok({"status": "error", "message": str(e),
                                    "exit_code": e.exit_code}, 200)
             if action == "publish":

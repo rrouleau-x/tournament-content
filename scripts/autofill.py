@@ -77,24 +77,35 @@ def write_module(tdir, filename, data):
             os.unlink(tmp)
         raise
 
-    # 2. Compile + validate the tournament with the candidate in place
-    bundle, _, _ = compile_mod.compile_bundle(tdir)
-    report = Report()
-    run_checks(bundle, report, run_link_checks=False, tdir=tdir)
-    blocking = report.blocking()
+    # 2. Compile + validate the tournament with the candidate in place.
+    #    Restore the original on ANY failure (blocking validation OR an
+    #    exception) — a raised error must never leave the candidate in
+    #    place and the previous module lost.
+    try:
+        bundle, _, _ = compile_mod.compile_bundle(tdir)
+        report = Report()
+        run_checks(bundle, report, run_link_checks=False, tdir=tdir)
+        blocking = report.blocking()
+    except BaseException:
+        _restore_original(path, original)
+        raise
     if blocking:
-        # Restore the original so a failed validation leaves the module
-        # exactly as it was
-        if original is not None:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(original)
-        else:
-            os.unlink(path)
+        _restore_original(path, original)
         msgs = "; ".join(m for _, _, m in blocking[:5])
         raise PlatformError(
             f"autofill output fails validation ({len(blocking)} blocking): {msgs}. "
             f"Module NOT written — fix the input data.")
     return path
+
+
+def _restore_original(path, original):
+    """Put the pre-autofill module content back (or remove the file if the
+    module didn't exist before)."""
+    if original is not None:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(original)
+    elif os.path.exists(path):
+        os.unlink(path)
 
 
 def fetch_json(url, headers=None):

@@ -308,6 +308,11 @@ def test_ui_smoke_csp_and_wiring(admin_env):
     # 'unsafe-inline'), so any style= attribute or .style.* JS write
     # would be silently blocked and the UI would break.
     assert "style=" not in html
+    # Wizard panels exist in the DOM
+    for marker in ('wiz-panel-1', 'wiz-panel-5', 'wiz-steps',
+                   'btn-wiz-next', 'btn-wiz-prev', 'n-team-name',
+                   'n-venue-name', 'n-mgr-name', 'n-coach-name'):
+        assert marker in html, f"index.html missing {marker}"
 
     s, js = req("GET", f"{admin_env['base']}/static/app.js")
     assert s == 200
@@ -322,7 +327,11 @@ def test_ui_smoke_csp_and_wiring(admin_env):
                    'function validateField', 'function validateAll',
                    'state.formErrors', 'keyvalue',
                    # revision history
-                   'function toggleHistory', 'e-history-card', 'history-row'):
+                   'function toggleHistory', 'e-history-card', 'history-row',
+                   # new-tournament wizard
+                   'function showWizard', 'function wizardNext',
+                   'function validateWizardStep', 'function renderWizardReview',
+                   'btn-create'):
         assert marker in js, f"app.js missing {marker}"
     s, css = req("GET", f"{admin_env['base']}/static/app.css")
     assert s == 200
@@ -767,3 +776,59 @@ def test_request_rate_cap(admin_env):
         adm._req_times["127.0.0.1"] = [time.monotonic()] * adm.REQ_LIMIT
     s, _d = req("GET", f"{base}/api/tournaments", token=token)
     assert s == 429, f"expected 429 over cap, got {s}"
+
+
+def test_wizard_create_fill_flow(admin_env):
+    """The wizard's create→fill flow: scaffold, then PUT each module with
+    baseDigest (the same path the edit view uses). After the wizard fills
+    the 8 required fields, validation must have ZERO blocking issues for
+    those fields (remaining failures are only optional-content warnings)."""
+    import compile as compile_mod
+    from validate import Report, run_checks
+    token = admin_env["admin_token"]
+    base = admin_env["base"]
+    org, slug = "wizard-org", "spring-classic-2027"
+
+    # Step 1: scaffold
+    s, d = req("POST", f"{base}/api/tournaments/new", token=token,
+               body={"org": org, "slug": slug, "name": "Spring Classic"})
+    assert s == 201, d
+    assert d["checklist"], "scaffold must return a checklist"
+
+    # Step 2: read back for digests (wizard does GET after scaffold)
+    s, fresh = req("GET", f"{base}/api/tournament/{org}/{slug}", token=token)
+    assert s == 200
+    digests = fresh["moduleDigests"]
+
+    # Step 3: the wizard's module writes — same PUT+baseDigest path
+    modules = {
+        "tournament.json": {"tournament": {"name": "Spring Classic",
+                                           "dates": {"start": "2027-03-12", "end": "2027-03-14"}}},
+        "team.json": {"team": {"name": "Savannah United 17/18B"}},
+        "venue.json": {"venue": {"name": "Veterans Park",
+                                 "address": "1332 Veterans Pkwy, St. Johns, FL"}},
+        "contacts.json": {"contacts": {"manager": {"name": "Jenn Boyd"},
+                                       "coach": {"name": "Keith Gunn"}}},
+    }
+    for fname, content in modules.items():
+        s, res = req("PUT", f"{base}/api/tournament/{org}/{slug}/module/{fname}",
+                     token=token, body={"content": json.dumps(content),
+                                        "baseDigest": digests[fname]})
+        assert s == 200, f"{fname}: {res}"
+
+    # Step 4: the created tournament compiles and validates clean for the
+    # fields the wizard filled — no schema/required failures left
+    tdir = os.path.join(admin_env["content"], "orgs", org, "tournaments", slug)
+    bundle, _used, _unk = compile_mod.compile_bundle(tdir)
+    report = Report()
+    run_checks(bundle, report, run_link_checks=False, tdir=tdir)
+    fails = report.blocking()
+    msgs = {m for _s, _c, m in fails}
+    assert not fails, f"wizard-filled tournament still has blocking issues: {msgs}"
+
+    # And the manifest is still a draft with no revision (wizard never
+    # touches the workflow state)
+    with open(os.path.join(tdir, "manifest.json")) as f:
+        m = json.load(f)
+    assert m["status"] == "draft"
+    assert "revision" not in m

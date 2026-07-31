@@ -68,9 +68,7 @@ function showList() {
 }
 function showNew() {
   if (!confirmDiscardChanges()) return;
-  $("view-list").classList.add("hidden");
-  $("view-new").classList.remove("hidden");
-  $("view-edit").classList.add("hidden");
+  showWizard();
 }
 async function showEdit(org, slug) {
   if (!confirmDiscardChanges()) return;
@@ -701,20 +699,184 @@ function renderReport(data) {
   $("e-report").textContent = lines.join("\n");
 }
 
+// ── New Tournament Wizard ─────────────────────────────────────────────
+// 5 guided steps (Basics → Team → Venue → Contacts → Review). Pure UI:
+// creation reuses the existing scaffold endpoint, then fills the modules
+// through the same atomic PUT+baseDigest save path as the edit view —
+// no new server write surface.
+let wizStep = 1;
+
+const WIZARD_STEPS = [
+  { id: 1, title: "Basics" },
+  { id: 2, title: "Team" },
+  { id: 3, title: "Venue" },
+  { id: 4, title: "Contacts" },
+  { id: 5, title: "Review" },
+];
+
+function showWizard() {
+  wizStep = 1;
+  $("view-list").classList.add("hidden");
+  $("view-edit").classList.add("hidden");
+  $("view-new").classList.remove("hidden");
+  renderWizardStep();
+}
+
+function renderWizardStep() {
+  // Panels + step indicator
+  for (const s of WIZARD_STEPS) {
+    $("wiz-panel-" + s.id).classList.toggle("hidden", s.id !== wizStep);
+    const stepEl = document.querySelector(`.wiz-step[data-step="${s.id}"]`);
+    if (stepEl) stepEl.classList.toggle("active", s.id === wizStep);
+  }
+  // Nav buttons
+  $("btn-wiz-prev").classList.toggle("hidden", wizStep === 1);
+  $("btn-wiz-next").classList.toggle("hidden", wizStep === 5);
+  $("btn-create").classList.toggle("hidden", wizStep !== 5);
+  // Review summary on the last step
+  if (wizStep === 5) renderWizardReview();
+  // Clear any step error
+  $("wiz-err-" + wizStep).classList.add("hidden");
+}
+
+function wizardFields() {
+  return {
+    org: $("n-org").value.trim(),
+    slug: $("n-slug").value.trim(),
+    name: $("n-name").value.trim(),
+    dateStart: $("n-date-start").value,
+    dateEnd: $("n-date-end").value,
+    teamName: $("n-team-name").value.trim(),
+    teamShort: $("n-team-short").value.trim(),
+    venueName: $("n-venue-name").value.trim(),
+    venueAddress: $("n-venue-address").value.trim(),
+    mgrName: $("n-mgr-name").value.trim(),
+    mgrPhone: $("n-mgr-phone").value.trim(),
+    coachName: $("n-coach-name").value.trim(),
+    coachPhone: $("n-coach-phone").value.trim(),
+  };
+}
+
+const IDENT_RE_JS = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+function validateWizardStep(step, f) {
+  const err = $("wiz-err-" + step);
+  err.classList.add("hidden");
+  let msg = null;
+  if (step === 1) {
+    if (!f.org) msg = "org is required (e.g. savannah-united)";
+    else if (!IDENT_RE_JS.test(f.org)) msg = "org must be lowercase letters/numbers/hyphens, start with a letter or number";
+    else if (!f.slug) msg = "slug is required (e.g. disney-showcase-2027)";
+    else if (!IDENT_RE_JS.test(f.slug)) msg = "slug must be lowercase letters/numbers/hyphens, start with a letter or number";
+    else if (!f.name) msg = "display name is required (parents see this)";
+    else if (f.dateStart && f.dateEnd && f.dateStart > f.dateEnd) msg = "start date is after end date";
+  } else if (step === 2) {
+    if (!f.teamName) msg = "team name is required";
+  } else if (step === 3) {
+    if (!f.venueName) msg = "venue name is required";
+    else if (!f.venueAddress) msg = "venue address is required";
+  } else if (step === 4) {
+    if (!f.mgrName) msg = "team manager name is required (logistics contact)";
+    else if (!f.coachName) msg = "head coach name is required (soccer questions)";
+  }
+  if (msg) {
+    err.textContent = msg;
+    err.classList.remove("hidden");
+    return false;
+  }
+  return true;
+}
+
+function wizardNext() {
+  const f = wizardFields();
+  if (!validateWizardStep(wizStep, f)) return;
+  wizStep++;
+  renderWizardStep();
+}
+
+function wizardPrev() {
+  if (wizStep > 1) { wizStep--; renderWizardStep(); }
+}
+
+function renderWizardReview() {
+  const f = wizardFields();
+  const lines = [];
+  const push = (label, val) => lines.push(`<div class="wiz-rev-row"><span class="muted">${esc(label)}</span><span>${esc(val || "—")}</span></div>`);
+  push("org / slug", f.org + " / " + f.slug);
+  push("Display name", f.name);
+  push("Dates", f.dateStart ? (f.dateStart + " → " + (f.dateEnd || "TBD")) : "not set");
+  push("Team", f.teamName + (f.teamShort ? " (" + f.teamShort + ")" : ""));
+  push("Venue", f.venueName);
+  push("Venue address", f.venueAddress);
+  push("Team manager", f.mgrName + (f.mgrPhone ? " · " + f.mgrPhone : ""));
+  push("Head coach", f.coachName + (f.coachPhone ? " · " + f.coachPhone : ""));
+  $("wiz-review").innerHTML = lines.join("");
+}
+
 async function createTournament() {
   if (!confirmDiscardChanges()) return;
-  const org = $("n-org").value.trim(), slug = $("n-slug").value.trim();
-  if (!org || !slug) { flash("org and slug required", false); return; }
-  const d = await api("POST", "/api/tournaments/new", { org, slug, name: $("n-name").value.trim() });
+  const f = wizardFields();
+  if (!validateWizardStep(5, f)) return; // re-validate everything on create
+
+  // 1. Scaffold from the versioned template (server returns checklist)
+  const d = await api("POST", "/api/tournaments/new", { org: f.org, slug: f.slug, name: f.name });
   if (d.error) { flash(d.error, false); return; }
   flash("Created " + d.tournament + " (draft)");
-  if (d.checklist && d.checklist.length) {
-    // Surface the incompleteness checklist so a non-technical admin knows
-    // exactly what to fill before this tournament can be published.
-    const items = d.checklist.map(c => "• " + c.module + " → " + c.field).join("\n");
-    alert("New tournament created — fill these before publishing:\n\n" + items);
+
+  // 2. Read back the fresh tournament for module digests (baseDigest
+  //    required by the optimistic-concurrency save path).
+  const fresh = await api("GET", `/api/tournament/${f.org}/${f.slug}`);
+  const digests = fresh.moduleDigests || {};
+
+  // 3. Fill the modules the wizard collected — through the SAME
+  //    PUT+baseDigest path the edit view uses (atomic, conflict-safe).
+  const modules = {};
+
+  const tournament = { name: f.name };
+  if (f.dateStart || f.dateEnd) {
+    tournament.dates = { start: f.dateStart || "", end: f.dateEnd || "" };
   }
-  showList();
+  modules["tournament.json"] = { tournament };
+
+  modules["team.json"] = { team: { name: f.teamName } };
+  if (f.teamShort) modules["team.json"].team.shortName = f.teamShort;
+
+  modules["venue.json"] = { venue: { name: f.venueName, address: f.venueAddress } };
+
+  const contacts = {};
+  if (f.mgrName) {
+    contacts.manager = { name: f.mgrName };
+    if (f.mgrPhone) contacts.manager.phone = f.mgrPhone;
+  }
+  if (f.coachName) {
+    contacts.coach = { name: f.coachName };
+    if (f.coachPhone) contacts.coach.phone = f.coachPhone;
+  }
+  modules["contacts.json"] = { contacts };
+
+  for (const [file, content] of Object.entries(modules)) {
+    const res = await api("PUT", `/api/tournament/${f.org}/${f.slug}/module/${file}`, {
+      content: JSON.stringify(content, null, 2),
+      baseDigest: digests[file],
+    });
+    if (res.error) {
+      flash("Created, but " + file + " save failed: " + res.error, false);
+      break;
+    }
+  }
+
+  // 4. Report what's still empty (the template checklist minus what the
+  //    wizard just filled) and land in the edit view.
+  const remaining = (d.checklist || []).filter(c =>
+    !["tournament.name", "tournament.dates.start", "tournament.dates.end",
+      "team.name", "venue.name", "venue.address",
+      "contacts.manager", "contacts.coach"].includes(c.field));
+  if (remaining.length) {
+    flash("Draft created — optional fields to fill: " + remaining.map(c => c.field).join(", "));
+  } else {
+    flash("Draft created — all required fields set. Validate, approve, publish when ready.");
+  }
+  showEdit(f.org, f.slug);
 }
 
 async function loadList() {
@@ -801,6 +963,8 @@ function wire(id, fn) {
 }
 wire("btn-new", showNew);
 wire("btn-cancel-new", showList);
+wire("btn-wiz-prev", wizardPrev);
+wire("btn-wiz-next", wizardNext);
 wire("btn-back", showList);
 wire("btn-save", saveModule);
 wire("btn-validate", runValidate);

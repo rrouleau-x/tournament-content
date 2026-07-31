@@ -26,15 +26,88 @@
 </div>
 
 <div class="wrap hidden" id="view-new">
-  <div class="card card-narrow">
-    <h2>New Tournament</h2>
-    <div class="grid grid-gap-sm">
-      <input id="n-org" placeholder="org (e.g. savannah-united)" class="input-std">
-      <input id="n-slug" placeholder="slug (e.g. disney-showcase-2027)" class="input-std">
-      <input id="n-name" placeholder="display name (optional)" class="input-std">
+  <div class="card">
+    <h2>New Tournament Wizard</h2>
+    <div class="wiz-steps" id="wiz-steps">
+      <span class="wiz-step active" data-step="1">1. Basics</span>
+      <span class="wiz-sep">→</span>
+      <span class="wiz-step" data-step="2">2. Team</span>
+      <span class="wiz-sep">→</span>
+      <span class="wiz-step" data-step="3">3. Venue</span>
+      <span class="wiz-sep">→</span>
+      <span class="wiz-step" data-step="4">4. Contacts</span>
+      <span class="wiz-sep">→</span>
+      <span class="wiz-step" data-step="5">5. Review</span>
     </div>
+
+    <!-- Step 1: basics -->
+    <div class="wiz-panel" id="wiz-panel-1">
+      <h3>Tournament basics</h3>
+      <p class="muted">The org and slug become the URL — keep them short and lowercase
+        (letters, numbers, hyphens only). The rest can be edited later.</p>
+      <div class="grid grid-gap-sm">
+        <input id="n-org" placeholder="org (e.g. savannah-united)" class="input-std" autocomplete="off">
+        <input id="n-slug" placeholder="slug (e.g. disney-showcase-2027)" class="input-std" autocomplete="off">
+        <input id="n-name" placeholder="display name (e.g. Disney Showcase)" class="input-std">
+        <div class="row">
+          <input id="n-date-start" type="date" class="input-std" aria-label="start date">
+          <span class="muted">to</span>
+          <input id="n-date-end" type="date" class="input-std" aria-label="end date">
+        </div>
+      </div>
+      <div class="field-err hidden" id="wiz-err-1"></div>
+    </div>
+
+    <!-- Step 2: team -->
+    <div class="wiz-panel hidden" id="wiz-panel-2">
+      <h3>Team</h3>
+      <p class="muted">Who plays in this guide? You can add colors and a logo later in the Team tab.</p>
+      <div class="grid grid-gap-sm">
+        <input id="n-team-name" placeholder="team name (e.g. Savannah United 17/18B)" class="input-std">
+        <input id="n-team-short" placeholder="short name (optional, e.g. SU 17/18B)" class="input-std">
+      </div>
+      <div class="field-err hidden" id="wiz-err-2"></div>
+    </div>
+
+    <!-- Step 3: venue -->
+    <div class="wiz-panel hidden" id="wiz-panel-3">
+      <h3>Venue</h3>
+      <p class="muted">Where do the games happen? Coordinates, parking, and field details
+        can be added later in the Venue tab.</p>
+      <div class="grid grid-gap-sm">
+        <input id="n-venue-name" placeholder="venue name (e.g. Veterans Park)" class="input-std">
+        <input id="n-venue-address" placeholder="street address (e.g. 1332 Veterans Pkwy, St. Johns, FL)" class="input-std">
+      </div>
+      <div class="field-err hidden" id="wiz-err-3"></div>
+    </div>
+
+    <!-- Step 4: contacts -->
+    <div class="wiz-panel hidden" id="wiz-panel-4">
+      <h3>Contacts</h3>
+      <p class="muted">Who do parents contact for tournament logistics vs soccer questions?
+        Phone/email optional — they can be added later.</p>
+      <div class="grid grid-gap-sm">
+        <input id="n-mgr-name" placeholder="team manager name" class="input-std">
+        <input id="n-mgr-phone" placeholder="manager phone (optional)" class="input-std">
+        <input id="n-coach-name" placeholder="head coach name" class="input-std">
+        <input id="n-coach-phone" placeholder="coach phone (optional)" class="input-std">
+      </div>
+      <div class="field-err hidden" id="wiz-err-4"></div>
+    </div>
+
+    <!-- Step 5: review -->
+    <div class="wiz-panel hidden" id="wiz-panel-5">
+      <h3>Review &amp; create</h3>
+      <p class="muted">This creates a draft tournament from a clean template and fills in
+        what you entered. Nothing is published — you review, approve, and publish later.</p>
+      <div class="card-inner" id="wiz-review"></div>
+      <div class="field-err hidden" id="wiz-err-5"></div>
+    </div>
+
     <div class="actions">
-      <button class="btn-blue" id="btn-create">Create</button>
+      <button class="btn-ghost" id="btn-wiz-prev">← Back</button>
+      <button class="btn-blue" id="btn-wiz-next">Next →</button>
+      <button class="btn-blue hidden" id="btn-create">Create Draft</button>
       <button class="btn-ghost" id="btn-cancel-new">Cancel</button>
     </div>
   </div>

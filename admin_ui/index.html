@@ -129,6 +129,7 @@
       <button class="btn-amber" onclick="runPreview()">Preview Publish</button>
       <button class="btn-green" onclick="runApprove()">Approve Content</button>
       <button class="btn-red" onclick="runPublish()">Publish</button>
+      <button class="btn-ghost" onclick="runAutofill()" title="AI-assisted fill for this module">Autofill</button>
     </div>
   </div>
   <div class="card hidden" id="e-report-card" style="margin-top:16px">
@@ -266,6 +267,38 @@ async function saveModule() {
 function currentModuleName() {
   const act = $("e-tabs").querySelector(".tab.active");
   return (act ? act.textContent : state.modules[0]).replace(/\s+/g, "-") + ".json";
+}
+
+async function runAutofill() {
+  const mod = currentModuleName();
+  const org = state.current.org, slug = state.current.slug;
+  let body;
+  if (mod === "weather.json") {
+    // venue coordinates come from the venue module
+    const v = await api("GET", `/api/tournament/${org}/${slug}`);
+    const venue = (v.bundle && v.bundle.venue) || {};
+    const coords = venue.coordinates || {};
+    if (!coords.lat || !coords.lng) { flash("venue.json has no coordinates — add lat/lng first", false); return; }
+    body = { lat: coords.lat, lng: coords.lng };
+  } else if (mod === "rules.json") {
+    const url = prompt("Rules page URL (e.g. Google Docs):");
+    if (!url) return;
+    body = { url };
+  } else if (mod === "schedule.json") {
+    const raw = prompt("Paste games JSON: {\"games\":[{date,time,opponent,...}],\"scheduleStatus\":\"partial\"}");
+    if (!raw) return;
+    try { body = { data: JSON.parse(raw) }; } catch (e) { flash("Invalid JSON: " + e.message, false); return; }
+  } else if (mod === "hotels.json") {
+    const raw = prompt("Paste research JSON: {\"stayToPlay\":true,\"official\":[{name,drive,...}]}");
+    if (!raw) return;
+    try { body = { data: JSON.parse(raw) }; } catch (e) { flash("Invalid JSON: " + e.message, false); return; }
+  } else {
+    flash("Autofill supports: weather, rules, schedule, hotels", false); return;
+  }
+  const d = await api("POST", `/api/tournament/${org}/${slug}/autofill/${mod}`, body);
+  if (d.error) { flash(d.error, false); return; }
+  flash(d.message + " — draft only, approve before publish");
+  await showEdit(org, slug);
 }
 
 async function runValidate() {

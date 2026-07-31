@@ -233,6 +233,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard_api():
             return
         parts = path.split("/")
+        # POST /api/tournament/<org>/<slug>/autofill/<module>
+        if len(parts) == 7 and parts[5] == "autofill":
+            org, slug, module = unquote(parts[3]), unquote(parts[4]), unquote(parts[6])
+            tdir = tournament_path(org, slug)
+            if not os.path.isdir(tdir):
+                return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
+            body = self._read_json()
+            return self._send(*self._autofill(org, slug, module, body))
         if len(parts) == 6 and parts[5] in ("validate", "preview", "approve", "publish"):
             org, slug, action = unquote(parts[3]), unquote(parts[4]), parts[5]
             body = self._read_json()
@@ -244,6 +252,54 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json()
             return self._send(*self._new_tournament(body))
         return self._send(*api_err("not found", 404))
+
+    def _autofill(self, org, slug, module, body):
+        """Fill a module from body: {url} or {data} (module-specific).
+        Always writes draft content — never publishes."""
+        from autofill import fill_hotels, fill_rules, fill_schedule, fill_weather
+        tdir = tournament_path(org, slug)
+        module = module if module.endswith(".json") else module + ".json"
+        try:
+            if module == "weather.json":
+                path, msg = fill_weather(tdir, body.get("lat"), body.get("lng"))
+            elif module == "schedule.json":
+                data = body.get("data")
+                if not data:
+                    return api_err("schedule autofill needs 'data' (games array)")
+                import tempfile, json as _json
+                with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                                 encoding="utf-8") as tf:
+                    _json.dump(data, tf)
+                    tmp = tf.name
+                try:
+                    path, msg = fill_schedule(tdir, tmp)
+                finally:
+                    os.unlink(tmp)
+            elif module == "rules.json":
+                url = body.get("url") or body.get("data")
+                if not url:
+                    return api_err("rules autofill needs 'url' (rules page)")
+                path, msg = fill_rules(tdir, url)
+            elif module == "hotels.json":
+                data = body.get("data")
+                if not data:
+                    return api_err("hotels autofill needs 'data' (research JSON)")
+                import tempfile, json as _json
+                with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                                 encoding="utf-8") as tf:
+                    _json.dump(data, tf)
+                    tmp = tf.name
+                try:
+                    path, msg = fill_hotels(tdir, tmp)
+                finally:
+                    os.unlink(tmp)
+            else:
+                return api_err(f"no autofill for module '{module}' "
+                               f"(supported: weather, schedule, rules, hotels)")
+        except Exception as e:
+            return api_err(f"{type(e).__name__}: {e}", 500)
+        return api_ok({"module": module, "message": msg, "draft": True,
+                       "note": "Draft content — validate, then approve, then publish"})
 
     def _run_action(self, org, slug, action, body):
         tournament = f"{org}/{slug}"

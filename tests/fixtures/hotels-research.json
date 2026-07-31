@@ -1,0 +1,10 @@
+{
+  "stayToPlay": true,
+  "portal": "https://system.gotsport.com/stores/1903604Y4",
+  "official": [
+    {"name": "Hampton Inn & Suites Bartram Park", "chain": "Hilton", "rate": "$143/night", "rooms": 10, "drive": "7.9 mi · 15 min", "route": "Bartram Park Blvd & Race Track Rd", "amenities": ["Free breakfast", "Free parking"], "rating": 4.5, "bestValue": true, "bookUrl": "https://system.gotsport.com/stores/1903604Y4"}
+  ],
+  "nonOfficial": [
+    {"name": "HI Express Bartram Park", "drive": "3.5 mi · 6 min", "note": "Closest to venue."}
+  ]
+}

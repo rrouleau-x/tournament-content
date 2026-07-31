@@ -1,0 +1,8 @@
+{
+  "scheduleStatus": "partial",
+  "games": [
+    {"date": "2026-08-22", "time": "8:00 AM", "opponent": "Jacksonville FC", "field": "Field 3", "venue": "Veterans Park", "type": "group"},
+    {"date": "2026-08-22", "time": "11:30 AM", "opponent": "First Coast SC", "field": "Field 1", "venue": "Veterans Park", "type": "group"},
+    {"date": "2026-08-23", "time": "9:00 AM", "opponent": "TBD", "field": "TBD", "venue": "Veterans Park", "type": "group"}
+  ]
+}

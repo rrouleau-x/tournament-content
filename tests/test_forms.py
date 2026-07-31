@@ -45,6 +45,15 @@ def test_venue_model_shapes():
                      "fields", "amenities"]
 
 
+def test_venue_layoutnotes_keyvalue_widget():
+    """additionalProperties: {type: 'string'} objects must render as a
+    key/value map editor, not an empty section (the dynamic-key gap)."""
+    m = build_form_model("venue.json")
+    ln = field_by_path(m, "venue.fields.layoutNotes")
+    assert ln is not None
+    assert ln["widget"] == "keyvalue"
+
+
 def test_schedule_model():
     m = build_form_model("schedule.json")
     assert m is not None
@@ -123,3 +132,15 @@ def test_boolean_and_number_coercion():
     assert out["venue"]["amenities"]["aed"] is True
     _set_path(out, "venue.fields.count", "6", {"type": "integer"})
     assert out["venue"]["fields"]["count"] == 6
+
+
+def test_constraints_propagate_to_model():
+    """pattern/minLength/minItems/maxItems must flow from schema → model."""
+    m = build_form_model("schedule.json")
+    # games is an array with no explicit minItems in the schema today —
+    # the model simply carries what the schema declares (no crash, no
+    # fabricated constraints). Verify the propagation machinery works on
+    # a field that has minLength (venue.name has minLength: 1).
+    v = build_form_model("venue.json")
+    name = field_by_path(v, "venue.name")
+    assert name["minLength"] == 1

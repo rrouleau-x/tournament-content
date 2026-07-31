@@ -305,7 +305,10 @@ def test_ui_smoke_csp_and_wiring(admin_env):
                    # Phase 3 form engine wiring
                    'function renderModuleEditor', 'function getPath',
                    'function setPath', 'function delPath', 'function renderForm',
-                   'function renderField', 'btn-toggle-view'):
+                   'function renderField', 'btn-toggle-view',
+                   # Phase 3.5 review fixes
+                   'function validateField', 'function validateAll',
+                   'state.formErrors', 'keyvalue'):
         assert marker in js, f"app.js missing {marker}"
     s, css = req("GET", f"{admin_env['base']}/static/app.css")
     assert s == 200
@@ -389,3 +392,67 @@ def test_forms_endpoint_static_no_auth(admin_env):
     assert s == 200
     assert isinstance(d["forms"], list)
     assert len(d["forms"]) >= 3
+
+
+def test_validate_proposed_endpoint(admin_env):
+    """Candidates are validated WITHOUT saving; valid content passes,
+    broken content is rejected with messages, and the file is untouched."""
+    tdir = os.path.join(admin_env["content"], "orgs", "savannah-united",
+                        "tournaments", "sporting-jax-2026")
+    url = f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026/module/venue.json"
+    token = admin_env["admin_token"]
+
+    # 1. Read the real venue module
+    s, data = req("GET", f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026",
+                  token=token)
+    assert s == 200
+    original = data["moduleFiles"]["venue.json"]
+
+    # 2. Valid candidate → valid status, file untouched
+    s, d = req("PUT", url, token=token,
+               body={"action": "validate-proposed", "content": original})
+    assert s == 200, d
+    assert d["status"] == "valid", d
+    with open(os.path.join(tdir, "venue.json")) as f:
+        assert f.read() == original  # untouched
+
+    # 3. Broken candidate (missing required name) → invalid + messages,
+    #    file STILL untouched
+    broken = json.loads(original)
+    del broken["venue"]["name"]
+    s, d = req("PUT", url, token=token,
+               body={"action": "validate-proposed",
+                     "content": json.dumps(broken)})
+    assert s == 200, d
+    assert d["status"] == "invalid", d
+    assert d["blocking"] >= 1
+    assert any("name" in m["detail"] for m in d["messages"])
+    with open(os.path.join(tdir, "venue.json")) as f:
+        assert f.read() == original  # still untouched
+
+
+def test_publish_audit_records_authority(admin_env):
+    """Publish audit entries must record WHO and the AUTHORITY PATH
+    (user-role vs root-publish-header)."""
+    users = {"Keith": {"token": "publisher-token-keith", "role": "publisher"}}
+    with open(os.path.join(admin_env["content"], "users.json"), "w") as f:
+        json.dump(users, f)
+
+    tdir = f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026"
+    s, d = req("POST", f"{tdir}/publish", token="publisher-token-keith",
+               body={"no_links": True})
+    assert s == 200, d
+    assert d.get("status") in ("published", "noop"), d
+
+    with open(os.path.join(admin_env["content"], "out", "audit.log")) as f:
+        content = f.read()
+    assert '"actor": "Keith"' in content
+    assert "authority=user-role:publisher" in content
+
+    # Root publish header path records its own authority label
+    s, d = req("POST", f"{tdir}/publish", token=admin_env["admin_token"],
+               publish_token=admin_env["publish_token"], body={"no_links": True})
+    assert s == 200, d
+    with open(os.path.join(admin_env["content"], "out", "audit.log")) as f:
+        content = f.read()
+    assert "authority=root-publish-header" in content

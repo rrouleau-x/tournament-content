@@ -215,19 +215,24 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
     else:
         status_msg = "preview (dry-run — gate not enforced)"
 
-    # 4. Verify target + worktree
+    # 4. Resolve target. The workDir PATH is resolved here only to key the
+    #    deploy lock — actual verification (clean worktree, right repo,
+    #    main branch) happens INSIDE the lock: a check-to-lock window where
+    #    another process dirties the clone would otherwise exist.
     target = resolve_target(tournament, targets=targets)
-    workdir = workdir_override or verify_workdir(target)
     app_path = target["appPath"]
-    git_data = os.path.join(workdir, *app_path.split("/"))
+    lock_key_workdir = os.path.expanduser(workdir_override
+                                          or target.get("workDir", ""))
+    git_data = os.path.join(lock_key_workdir, *app_path.split("/"))
 
-    # 5-7. The ENTIRE shared-workdir section (fetch → diff → publish →
-    # mirror → record) runs under an exclusive per-workDir lock — a
-    # ThreadingHTTPServer can serve concurrent publishes, and a CLI
+    # 5-7. The ENTIRE shared-workdir section (verify → fetch → diff →
+    # publish → mirror → record) runs under an exclusive per-workDir lock —
+    # a ThreadingHTTPServer can serve concurrent publishes, and a CLI
     # run can race the server: without serialization two requests can
     # both pass the clean-worktree check and interleave writes into
     # the same clone. flock() covers threads AND processes.
     def _locked_publish():
+        workdir = workdir_override or verify_workdir(target)
         # 5. Fetch + semantic diff vs origin/main
         rc, _, err = run(["git", "fetch", "origin"], cwd=workdir)
         if rc != 0:
@@ -348,7 +353,8 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
 
     # Run the whole shared-workdir critical section under the exclusive
     # per-workDir lock (threads AND processes: ThreadingHTTPServer + CLI).
-    with _deploy_lock(workdir):
+    # Lock keyed by the resolved path — verification happens inside.
+    with _deploy_lock(lock_key_workdir):
         return _locked_publish()
 
 

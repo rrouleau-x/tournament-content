@@ -77,8 +77,12 @@ def _widget_for(schema, ui_field, name):
         props = (schema.get("properties") or {})
         if set(props) == {"lat", "lng"}:
             return "coords"
+        # additionalProperties: {type: "string"} → key/value map editor
+        ap = schema.get("additionalProperties")
+        if not props and isinstance(ap, dict) and ap.get("type") == "string":
+            return "keyvalue"
         return "section"
-    # name/long text hints
+    # name/long text hints (only after the object/array cases)
     low = name.lower()
     if any(k in low for k in ("notes", "description", "layout", "rules", "guidance")):
         return "textarea"
@@ -86,16 +90,28 @@ def _widget_for(schema, ui_field, name):
 
 
 def _walk_fields(schema, path, required_set, ui_fields):
-    """Recursively build the form-model field list for one schema node."""
+    """Recursively build the form-model field list for one schema node.
+    ui_fields: per-module UI config for this node — either flat field
+    configs ({name: {...}}) or a {order?, fields?} dict; child configs
+    live under 'children' and are descended into explicitly."""
     fields = []
     props = schema.get("properties") or {}
-    ui_order = ui_fields.get("order")
+    ui_order = ui_fields.get("order") if isinstance(ui_fields, dict) else None
     keys = ui_order if ui_order else list(props.keys())
     for name in keys:
         if name not in props:
             continue
         sub = props[name]
-        ui_field = ui_fields.get(name) or {}
+        # UI config for this field: direct entry OR nested under children
+        ui_field = {}
+        if isinstance(ui_fields, dict):
+            direct = ui_fields.get(name)
+            if isinstance(direct, dict):
+                ui_field = dict(direct)
+                if isinstance(ui_fields.get("children"), dict):
+                    nested = ui_fields["children"].get(name)
+                    if isinstance(nested, dict):
+                        ui_field.update(nested)
         if ui_field.get("hidden"):
             continue
         fpath = f"{path}.{name}" if path else name
@@ -110,12 +126,15 @@ def _walk_fields(schema, path, required_set, ui_fields):
         }
         if sub.get("enum"):
             field["options"] = sub["enum"]
-        for k in ("minimum", "maximum", "minLength"):
+        for k in ("minimum", "maximum", "minLength", "pattern"):
             if k in sub:
                 field[k] = sub[k]
         # Repeater → child fields from items schema
         if field["widget"] == "repeater":
             items = sub.get("items") or {}
+            for k in ("minItems", "maxItems"):
+                if k in sub:
+                    field[k] = sub[k]
             field["children"] = _walk_fields(
                 items, f"{fpath}[]", items.get("required"), ui_field)
         elif field["widget"] == "section":
@@ -266,7 +285,7 @@ UI_CONFIG = {
                 "count": {"label": "Number of fields", "help": "How many pitches are used"},
                 "surface": {"label": "Surface", "help": "Grass, turf, etc."},
                 "map": {"label": "Field map link"},
-                "layoutNotes": {"label": "Field layout notes", "widget": "textarea"},
+                "layoutNotes": {"label": "Field layout notes", "help": "Field # → note (e.g. 'Field 4: far side, near pond')"},
             },
             "amenities": {
                 "label": "Amenities",

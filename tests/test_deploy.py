@@ -290,3 +290,44 @@ def test_concurrent_publish_serializes(app_repo, valid_target):
     assert remote["tournament"]["name"] == "Sporting Jax Boys Invitational"
     # Worktree clean after both runs
     assert git(app_repo["workdir"], "status", "--porcelain") == ""
+
+
+def test_concurrent_publish_cross_process(app_repo, valid_target, tmp_path):
+    """The flock must serialize across PROCESSES (CLI guide.py vs admin
+    server), not just threads. Spawn a real subprocess that publishes to
+    the same clone while this process publishes concurrently. Both must
+    succeed; the remote must be valid and uncorrupted."""
+    import subprocess as sp
+    import sys as _sys
+
+    # Worker script: import deploy, publish once, print status.
+    targets_json = tmp_path / "targets.json"
+    import json as _json
+    with open(targets_json, "w") as f:
+        _json.dump(valid_target, f)
+    script = tmp_path / "publish_worker.py"
+    script.write_text(
+        "import json, sys, os\n"
+        f"sys.path.insert(0, {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))!r})\n"
+        f"sys.path.insert(0, {os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts')!r})\n"
+        "from deploy import deploy_tournament\n"
+        f"targets = json.load(open({str(targets_json)!r}))\n"
+        f"r = deploy_tournament({FIXTURE_TOURNAMENT!r}, targets=targets)\n"
+        "print(r.status, flush=True)\n",
+    )
+
+    # Start the subprocess worker and race it against this process
+    proc = sp.Popen([_sys.executable, str(script)], stdout=sp.PIPE, stderr=sp.PIPE,
+                    text=True)
+    # Publish from this process concurrently (the subprocess may win the
+    # lock — either order must be safe)
+    r = deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target)
+    out, err = proc.communicate(timeout=60)
+    worker_status = out.strip()
+    assert proc.returncode == 0, f"worker failed: {err}"
+
+    statuses = sorted([r.status, worker_status])
+    assert statuses == ["noop", "published"], (statuses, err)
+    remote = read_remote(app_repo["workdir"])
+    assert remote["tournament"]["name"] == "Sporting Jax Boys Invitational"
+    assert git(app_repo["workdir"], "status", "--porcelain") == ""

@@ -1,7 +1,8 @@
 
 const $ = (id) => document.getElementById(id);
 let state = { tournaments: [], current: null, modules: [], dirty: false,
-              formModel: null, showForm: false, rawContent: "{}", parsed: null };
+              formModel: null, showForm: false, rawContent: "{}", parsed: null,
+              formErrors: {} };
 
 function flash(msg, ok = true) {
   const f = $("flash");
@@ -184,9 +185,12 @@ function renderModuleEditor() {
         try { state.rawContent = JSON.stringify(state.parsed || {}, null, 2); }
         catch (e) { flash("Form state invalid: " + e.message, false); return; }
       } else {
-        // raw → form: re-parse the raw editor into the form object
-        try { state.parsed = JSON.parse(state.rawContent); }
+        // raw → form: re-parse the LIVE textarea, never a cached copy —
+        // typing in raw view only updates the DOM (and dirty flag), so
+        // trusting state.rawContent here would silently discard edits.
+        try { state.parsed = JSON.parse($("e-editor").value); }
         catch (e) { flash("Invalid JSON in raw editor: " + e.message, false); return; }
+        state.rawContent = $("e-editor").value;
       }
       state.showForm = !state.showForm;
       renderModuleEditor();
@@ -207,12 +211,12 @@ function renderModuleEditor() {
     } else {
       editor.classList.remove("hidden");
       editor.value = state.rawContent;
-      editor.oninput = () => { state.dirty = true; $("e-saved").classList.add("hidden"); };
+      editor.oninput = () => { state.dirty = true; state.rawContent = editor.value; $("e-saved").classList.add("hidden"); };
     }
   } else {
     editor.classList.remove("hidden");
     editor.value = state.rawContent;
-    editor.oninput = () => { state.dirty = true; $("e-saved").classList.add("hidden"); };
+    editor.oninput = () => { state.dirty = true; state.rawContent = editor.value; $("e-saved").classList.add("hidden"); };
   }
 }
 
@@ -274,6 +278,13 @@ function validateField(f, value) {
     if (isNaN(n)) return "Must be a number";
     if (f.minimum != null && n < f.minimum) return `Min ${f.minimum}`;
     if (f.maximum != null && n > f.maximum) return `Max ${f.maximum}`;
+  }
+  if (typeof value === "string") {
+    if (f.minLength != null && value.length < f.minLength) return `At least ${f.minLength} characters`;
+    if (f.pattern) {
+      try { if (!new RegExp(f.pattern).test(value)) return "Doesn't match the required format"; }
+      catch (e) { /* schema pattern not JS-compatible — skip client check */ }
+    }
   }
   if (f.widget === "select" && f.options && !f.options.includes(value))
     return "Pick from the list";
@@ -411,6 +422,62 @@ function renderField(f, data, rowIndex) {
     return wrap;
   }
 
+  if (f.widget === "keyvalue") {
+    // Dynamic-key string map (e.g. venue.fields.layoutNotes): rows of
+    // key + value. Keys are object properties, so rows edit in place.
+    const label = document.createElement("label");
+    label.textContent = f.label + (f.required ? " *" : "");
+    wrap.appendChild(label);
+    if (f.help) { const h = document.createElement("p"); h.className = "muted"; h.textContent = f.help; wrap.appendChild(h); }
+    const list = document.createElement("div");
+    list.className = "rep-list";
+    const obj = (value && typeof value === "object") ? value : {};
+    Object.keys(obj).forEach((k) => {
+      const row = document.createElement("div");
+      row.className = "rep-row";
+      row.style.flexDirection = "row";
+      const kIn = document.createElement("input");
+      kIn.type = "text";
+      kIn.value = k;
+      kIn.style.width = "40%";
+      kIn.placeholder = "Field #";
+      kIn.oninput = () => {
+        if (kIn.value === k) return;
+        const v = obj[k];
+        delete obj[k];
+        if (kIn.value) obj[kIn.value] = v;
+        state.dirty = true;
+        renderModuleEditor();
+      };
+      const vIn = document.createElement("input");
+      vIn.type = "text";
+      vIn.value = obj[k];
+      vIn.style.width = "60%";
+      vIn.placeholder = "Note…";
+      vIn.oninput = () => { obj[k] = vIn.value; state.dirty = true; $("e-saved").classList.add("hidden"); };
+      const rm = document.createElement("button");
+      rm.className = "btn-ghost btn-sm";
+      rm.textContent = "Remove";
+      rm.onclick = () => { delete obj[k]; state.dirty = true; renderModuleEditor(); };
+      row.appendChild(kIn); row.appendChild(vIn); row.appendChild(rm);
+      list.appendChild(row);
+    });
+    const add = document.createElement("button");
+    add.className = "btn-ghost btn-sm";
+    add.textContent = "+ Add " + f.label.toLowerCase();
+    add.onclick = () => {
+      const cur = getPath(data, f.path);
+      const map = (cur && typeof cur === "object") ? cur : {};
+      setPath(data, f.path, map);
+      map[""] = "";
+      state.dirty = true;
+      renderModuleEditor();
+    };
+    wrap.appendChild(list);
+    wrap.appendChild(add);
+    return wrap;
+  }
+
   if (f.widget === "coords") {
     const label = document.createElement("label");
     label.textContent = f.label + (f.required ? " *" : "");
@@ -438,15 +505,36 @@ function renderField(f, data, rowIndex) {
   const input = fieldInput(f, has ? value : "");
   const errEl = document.createElement("span");
   errEl.className = "field-err hidden";
+  // Persistent error state: a failed Save stores errors in state.formErrors
+  // and re-renders — the new render must show them (not wipe them).
+  const savedErr = (state.formErrors || {})[f.path];
+  if (savedErr) {
+    errEl.textContent = savedErr;
+    errEl.classList.remove("hidden");
+    input.classList.add("invalid");
+  }
   input.oninput = () => {
     let v = input.value;
     if (input.type === "checkbox") v = input.checked;
     else if (input.type === "number") v = input.value === "" ? null : parseFloat(input.value);
-    else if (v === "" && !f.required) v = null;
+    else if (v === "" && !f.required) {
+      // Empty optional: DELETE the key — writing null can violate a
+      // schema that expects a string (null is not a string).
+      delPath(data, f.path);
+      state.dirty = true;
+      $("e-saved").classList.add("hidden");
+      if (state.formErrors) delete state.formErrors[f.path];
+      errEl.textContent = "";
+      errEl.classList.add("hidden");
+      input.classList.remove("invalid");
+      return;
+    }
     setPath(data, f.path, v);
     state.dirty = true;
     $("e-saved").classList.add("hidden");
     const msg = validateField(f, v);
+    // clear this field's persisted error as it becomes valid
+    if (state.formErrors) delete state.formErrors[f.path];
     errEl.textContent = msg || "";
     errEl.classList.toggle("hidden", !msg);
     input.classList.toggle("invalid", !!msg);
@@ -465,13 +553,15 @@ async function saveModule() {
     // Client-side validation first: fix fields before saving.
     const errors = validateAll(state.formModel, state.parsed || {});
     if (Object.keys(errors).length) {
+      state.formErrors = errors;  // renderField reads this on render
       const first = Object.keys(errors)[0];
       flash("Form has errors — fix them first (" + first + ": " + errors[first] + ")", false);
-      renderModuleEditor();  // re-render to show error states
+      renderModuleEditor();  // re-render WITH error states (state.formErrors)
       const el = document.querySelector('[data-path="' + CSS.escape(first) + '"]');
       if (el) el.scrollIntoView({ block: "center" });
       return;
     }
+    state.formErrors = {};
     try {
       content = JSON.stringify(state.parsed || {}, null, 2);
     } catch (e) { flash("Form state invalid: " + e.message, false); return; }
@@ -498,6 +588,7 @@ function currentModuleName() {
 }
 
 async function runAutofill() {
+  if (!confirmDiscardChanges()) return;  // autofill overwrites the module
   const mod = currentModuleName();
   const org = state.current.org, slug = state.current.slug;
   let body;
@@ -580,6 +671,7 @@ function renderReport(data) {
 }
 
 async function createTournament() {
+  if (!confirmDiscardChanges()) return;
   const org = $("n-org").value.trim(), slug = $("n-slug").value.trim();
   if (!org || !slug) { flash("org and slug required", false); return; }
   const d = await api("POST", "/api/tournaments/new", { org, slug, name: $("n-name").value.trim() });

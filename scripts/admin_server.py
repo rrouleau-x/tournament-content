@@ -62,28 +62,21 @@ IDENT_RE = r"^[a-z0-9][a-z0-9-]{0,63}$"
 _audit_lock = threading.Lock()
 # Per-module optimistic-concurrency locks: read → compare → replace must be
 # atomic per file, or two simultaneous saves can both pass the digest check
-# and last-write-wins. Keyed by (org, slug, module). Bounded LRU — a long-
-# running server must not accumulate one lock per (tournament, module)
-# forever.
-_MODULE_LOCK_MAX = 512
-_module_locks = {}
-_module_locks_guard = threading.Lock()
+# and last-write-wins. Keyed by a stable hash of (org, slug, module) into a
+# FIXED striped pool — no eviction, so a lock can never be recycled while
+# another request holds it (the previous bounded-LRU eviction could hand
+# out two different locks for the same module simultaneously).
+_MODULE_LOCK_STRIPES = 256
+_module_lock_stripes = [threading.Lock() for _ in range(_MODULE_LOCK_STRIPES)]
 
 
 def _module_lock(org, slug, module):
-    key = (org, slug, module)
-    with _module_locks_guard:
-        lock = _module_locks.get(key)
-        if lock is None:
-            # Evict the oldest entry when over budget (insertion order =
-            # recency; re-inserting refreshes it below).
-            while len(_module_locks) >= _MODULE_LOCK_MAX:
-                _module_locks.pop(next(iter(_module_locks)))
-            lock = threading.Lock()
-        # Refresh recency: pop + re-insert
-        _module_locks.pop(key, None)
-        _module_locks[key] = lock
-        return lock
+    """Stable stripe lock for a (org, slug, module) triple. Two requests
+    for the same module ALWAYS get the same lock; different modules may
+    share a stripe (harmless — they serialize on unrelated files)."""
+    key = f"{org}/{slug}/{module}"
+    h = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return _module_lock_stripes[int(h[:8], 16) % _MODULE_LOCK_STRIPES]
 
 
 def _load_or_create_token(env_name, path):
@@ -343,16 +336,19 @@ class Handler(BaseHTTPRequestHandler):
           - a bearer user token whose role is publisher or admin.
         An editor-role user can never publish; if PUBLISH_TOKEN is unset
         AND no privileged user exists, publish is refused (safer than
-        allowing it by accident)."""
+        allowing it by accident).
+        Returns (authorized, authority) — authority is recorded in the
+        audit log so the authorization path is visible, not just the
+        initiating actor."""
         token = self._bearer()
         header = self.headers.get("X-Publish-Token", "").strip()
         if header and PUBLISH_TOKEN and secrets.compare_digest(header, PUBLISH_TOKEN):
-            return True
+            return True, "root-publish-header"
         if token:
             user = user_for_token(token)
             if user and user["role"] in ("publisher", "admin"):
-                return True
-        return False
+                return True, f"user-role:{user['role']}"
+        return False, None
 
     def _guard_api(self):
         if not self._authorized():
@@ -458,6 +454,55 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
                 fpath = safe_module_path(tdir, module)
                 body = self._read_json()
+                action = body.get("action")
+                if action == "validate-proposed":
+                    # Validate candidate module content WITHOUT saving —
+                    # club admins get field-level feedback before a save.
+                    from compile import compile_bundle
+                    from validate import Report, run_checks
+                    from forms import build_form_model
+                    content = body.get("content")
+                    if content is None:
+                        return self._send(*api_err("missing 'content' in body"))
+                    json.loads(content)
+                    # Write candidate to a temp location and compile
+                    # the tournament with it — the module path is the
+                    # source of truth for compilation.
+                    import tempfile as _tf
+                    with _tf.NamedTemporaryFile("w", dir=tdir, suffix=".json",
+                                                delete=False, encoding="utf-8") as tmpf:
+                        tmpf.write(content)
+                        tmp_name = tmpf.name
+                    try:
+                        # swap in candidate, compile+validate, restore
+                        backup = None
+                        if os.path.exists(fpath):
+                            with open(fpath, encoding="utf-8") as f:
+                                backup = f.read()
+                        os.replace(tmp_name, fpath)
+                        try:
+                            bundle, _, _ = compile_bundle(tdir)
+                            report = Report()
+                            run_checks(bundle, report, run_link_checks=False,
+                                       tdir=tdir)
+                            blocking = report.blocking()
+                            warnings = report.summary()["warnings"]
+                        finally:
+                            if backup is not None:
+                                with open(fpath, "w", encoding="utf-8") as f:
+                                    f.write(backup)
+                            else:
+                                os.unlink(fpath)
+                        return self._send(*api_ok({
+                            "status": "valid" if not blocking else "invalid",
+                            "blocking": len(blocking),
+                            "warnings": warnings,
+                            "messages": [{"level": m[0], "detail": m[2]}
+                                         for m in blocking[:20]],
+                        }))
+                    finally:
+                        if os.path.exists(tmp_name):
+                            os.unlink(tmp_name)
                 content = body.get("content")
                 if content is None:
                     return self._send(*api_err("missing 'content' in body"))
@@ -613,7 +658,8 @@ class Handler(BaseHTTPRequestHandler):
             if action == "publish":
                 # NO allow_draft over HTTP — publish must go through the
                 # approval gate. Requires PUBLISH_TOKEN (separate credential).
-                if not self._publish_authorized():
+                ok, authority = self._publish_authorized()
+                if not ok:
                     return api_err(
                         "publish requires the publish token (X-Publish-Token "
                         "header) — this credential is separate from the editor "
@@ -628,7 +674,8 @@ class Handler(BaseHTTPRequestHandler):
                         allow_draft=False,
                         record_published=True)  # real publish: update source manifest
                     audit(self._actor(), "publish", tournament,
-                          digest=result.digest, detail=result.status)
+                          digest=result.digest,
+                          detail=f"authority={authority}; {result.status}")
                     return api_ok(result.to_dict())
                 except PlatformError as e:
                     audit(self._actor(), "publish.failed", tournament, detail=str(e)[:200])

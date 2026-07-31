@@ -110,8 +110,45 @@ def test_form_to_json_roundtrip_venue():
     assert out["venue"]["coordinates"] == {"lat": 30.0821, "lng": -81.5484}
     assert out["venue"]["fields"]["count"] == 6
     assert out["venue"]["amenities"]["concessions"] is True
-    # Optional empty strings dropped (schema forbids them via type)
-    assert "shade" not in out["venue"]["amenities"] or out["venue"]["amenities"].get("shade") is None
+    # Optional empty strings must be DELETED, never null — the browser
+    # deletes empty optional keys on save, so the Python helper must
+    # round-trip to the same shape (key ABSENT, not None).
+    assert "shade" not in out["venue"]["amenities"]
+
+
+def test_empty_optional_values_delete_keys():
+    """Empty optional values of every type → the key is ABSENT, not
+    null. This is the exact invariant the browser enforces (delPath on
+    empty) — the Python form_to_json must produce the same JSON."""
+    m = build_form_model("venue.json")
+    # Explicitly empty optional fields (they ARE in the form model)
+    values = {
+        "venue.name": "Veterans Park",        # required — filled
+        "venue.address": "100 Tournament Dr",  # required — filled
+        # Optional: empty string / empty URL / no number / no boolean
+        "venue.parking": "",
+        "venue.mapsUrl": "",
+        "venue.coordinates.lat": "",
+        "venue.coordinates.lng": "",
+        "venue.amenities.concessions": "",
+        "venue.amenities.shade": "",
+        "venue.amenities.aed": "",
+        "venue.fields.surface": "",
+        # Required field with empty input: also deleted (the schema/
+        # validation layer flags it as missing — form save is blocked
+        # client-side for required fields, this is the raw-helper path)
+        "venue.fields.count": "",
+    }
+    out = form_to_json(m, values)
+    # Every optional key must be absent — not present-with-None
+    assert "parking" not in out["venue"]
+    assert "mapsUrl" not in out["venue"]
+    assert "coordinates" not in out["venue"]
+    assert "fields" not in out["venue"]      # both children empty → pruned
+    assert "amenities" not in out["venue"]   # all children empty → pruned
+    # Required fields survived
+    assert out["venue"]["name"] == "Veterans Park"
+    assert out["venue"]["address"] == "100 Tournament Dr"
 
 
 def test_set_path_repeater_indices():

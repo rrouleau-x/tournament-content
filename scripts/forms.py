@@ -252,9 +252,21 @@ _EMPTY = _Empty()
 def _set_path(obj, path, value, field):
     """path like 'venue.coordinates.lat' or 'games[].opponent' — repeater
     indices are handled by the UI passing indexed paths (games[0].opponent).
-    Empty optional values delete the key instead of writing None."""
+    Empty optional values delete the key instead of writing None.
+
+    The empty-check MUST run on the COERCED value: _coerce() maps "" and
+    None to the _EMPTY sentinel, and only that sentinel means "delete the
+    key". Checking the raw input would miss empty strings and store the
+    sentinel itself.
+
+    After a deletion, empty ancestor OBJECTS are pruned bottom-up: if the
+    user cleared every coordinate, an empty coordinates {} shell must not
+    survive. (Lists are never pruned — an emptied repeater index slot is
+    left for the UI's row model.)"""
     parts = path.split(".")
     cur = obj
+    # (container, key) chain so a deletion can prune empty ancestors
+    chain = []
     for i, part in enumerate(parts):
         is_last = i == len(parts) - 1
         m = re.match(r"^(.+)\[(\d+)\]$", part)
@@ -264,36 +276,40 @@ def _set_path(obj, path, value, field):
             while len(cur[key]) <= idx:
                 cur[key].append({})
             if is_last:
-                if value is _EMPTY:
+                coerced = _coerce(value, field)
+                if coerced is _EMPTY:
                     del cur[key][idx]
                 else:
-                    cur[key][idx] = _coerce(value, field)
+                    cur[key][idx] = coerced
             else:
+                chain.append((cur, key))
                 cur = cur[key][idx]
         else:
             if is_last:
-                if value is _EMPTY:
+                coerced = _coerce(value, field)
+                if coerced is _EMPTY:
                     cur.pop(part, None)
+                    _prune_empty_ancestors(obj, chain)
                 else:
-                    cur[part] = _coerce(value, field)
+                    cur[part] = coerced
             else:
+                chain.append((cur, part))
                 cur.setdefault(part, {})
                 cur = cur[part]
     return obj
 
 
-def _coerce(value, field):
-    if value is None or value == "":
-        # Don't emit empty strings for optional fields the schema forbids
-        return None
-    if field["type"] in ("number", "integer"):
-        try:
-            return int(value) if field["type"] == "integer" else float(value)
-        except (TypeError, ValueError):
-            return value
-    if field["type"] == "boolean":
-        return bool(value) if isinstance(value, bool) else value in (True, "true", "on", "1")
-    return value
+def _prune_empty_ancestors(obj, chain):
+    """Remove ancestor dicts that became empty after a leaf deletion.
+    chain is the [(container, key)] path to the deleted leaf, innermost
+    first. Stops at the first non-empty ancestor (nothing above it can
+    have been emptied by this deletion)."""
+    for container, key in reversed(chain):
+        node = container.get(key)
+        if isinstance(node, dict) and node == {}:
+            del container[key]
+        else:
+            break
 
 
 # ── Per-module UI config ────────────────────────────────────────────────

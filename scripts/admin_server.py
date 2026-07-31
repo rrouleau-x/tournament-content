@@ -100,21 +100,40 @@ def _client_ip(handler):
 
 def _sliding_allow(store, key, limit, window):
     """True if key is under limit in the last `window` seconds.
-    Caller must hold _rate_lock. Evicts stale entries and, when the
-    store grows unbounded, drops the least-recently-seen keys."""
+    Caller must hold _rate_lock. Prunes the touched key's stale entries;
+    when the store exceeds _MAX_TRACKED_IPS, runs a FULL bounded-eviction
+    pass: every key's stale timestamps are dropped, empty keys are
+    deleted, and if still over the cap the least-recently-seen keys are
+    evicted (list length doubles as last-seen recency) until at/below
+    the maximum."""
     import time
     now = time.monotonic()
     times = store.setdefault(key, [])
     while times and now - times[0] > window:
         times.pop(0)
     if len(store) > _MAX_TRACKED_IPS:
-        # Crude bounded eviction: keep only keys seen in the last window.
-        for k in [k for k in store if not store[k]]:
-            del store[k]
+        _evict_over_cap(store, now, window)
     if len(times) >= limit:
         return False
     times.append(now)
     return True
+
+
+def _evict_over_cap(store, now, window):
+    """Genuinely bounded eviction for a store that exceeds the cap:
+    1) prune stale timestamps for ALL keys, 2) drop keys left empty,
+    3) evict least-recently-seen keys until at/below the maximum."""
+    for k in list(store):
+        times = store[k]
+        while times and now - times[0] > window:
+            times.pop(0)
+        if not times:
+            del store[k]
+    while len(store) > _MAX_TRACKED_IPS:
+        # List length is a recency proxy (touched keys have more entries
+        # within the window) — evict the shortest-lived key.
+        victim = min(store, key=lambda k: len(store[k]))
+        del store[victim]
 
 
 def _rate_limited(handler):

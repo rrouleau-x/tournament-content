@@ -52,76 +52,48 @@ def load_module(tdir, filename):
 
 
 def write_module(tdir, filename, data):
-    """Write a module file atomically (temp + os.replace). VALIDATES FIRST:
-    the candidate is compiled into a bundle and checked; if validation has
-    blocking issues the file is NOT written (the original stays intact)."""
-    path = os.path.join(tdir, filename)
-    import tempfile
+    """Write a module file atomically (temp + os.replace). VALIDATES
+    FIRST, IN MEMORY: the candidate is compiled via compile_bundle's
+    override mechanism (the same one validate-proposed uses) and checked
+    against the Guide Health Report BEFORE anything touches disk. Only a
+    validated candidate is written — there is no swap-then-restore phase,
+    so even a hard process death cannot leave an unvalidated module
+    installed (the old design wrote first, then restored on failure)."""
+    import json as _json
     import compile as compile_mod
     from validate import Report, run_checks
 
-    original = None
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            original = f.read()
+    candidate = _json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
-    # 1. Write candidate atomically over the real path
+    # 1. Validate the candidate IN MEMORY — the live file is never touched.
+    bundle, _, _ = compile_mod.compile_bundle(tdir, overrides={filename: candidate})
+    report = Report()
+    run_checks(bundle, report, run_link_checks=False, tdir=tdir)
+    blocking = report.blocking()
+    if blocking:
+        msgs = "; ".join(m for _, _, m in blocking[:5])
+        raise PlatformError(
+            f"autofill output fails validation ({len(blocking)} blocking): {msgs}. "
+            f"Module NOT written — fix the input data.")
+
+    # 2. Only now write — single atomic replace, nothing to restore.
+    import tempfile
+    path = os.path.join(tdir, filename)
     fd, tmp = tempfile.mkstemp(dir=tdir, prefix=".tmp-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+            f.write(candidate)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
-
-    # 2. Compile + validate the tournament with the candidate in place.
-    #    Restore the original on ANY failure (blocking validation OR an
-    #    exception) — a raised error must never leave the candidate in
-    #    place and the previous module lost.
-    try:
-        bundle, _, _ = compile_mod.compile_bundle(tdir)
-        report = Report()
-        run_checks(bundle, report, run_link_checks=False, tdir=tdir)
-        blocking = report.blocking()
-    except BaseException:
-        _restore_original(path, original)
-        raise
-    if blocking:
-        _restore_original(path, original)
-        msgs = "; ".join(m for _, _, m in blocking[:5])
-        raise PlatformError(
-            f"autofill output fails validation ({len(blocking)} blocking): {msgs}. "
-            f"Module NOT written — fix the input data.")
     return path
 
 
-def _restore_original(path, original):
-    """Put the pre-autofill module content back (or remove the file if the
-    module didn't exist before) — atomically via a sibling temp file +
-    os.replace, so a failure during restoration can never truncate the
-    original."""
-    import tempfile
-    d = os.path.dirname(path)
-    if original is not None:
-        fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-restore-", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(original)
-            os.replace(tmp, path)
-        except BaseException:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
-    elif os.path.exists(path):
-        os.unlink(path)
-
-
-def fetch_json(url, headers=None):
+def fetch_json(url, headers=None, timeout=20):
     req = urllib.request.Request(url, headers=headers or NWS_UA)
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=float(timeout)) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -181,11 +153,18 @@ def _check_peer_public(resp):
     validates the name, but urllib re-resolves when connecting — a hostile
     DNS server could return a public IP for the check and a private IP for
     the connect. After the socket is open, verify the ACTUAL connected
-    peer is public before reading any data."""
+    peer is public before reading any data.
+
+    LIMITATION (documented honestly): this relies on urllib's private
+    socket internals. If the socket can't be located (different urllib
+    version, exotic handler), the check FAILS OPEN — the request proceeds
+    on the strength of the pre-connect + redirect validation only. The
+    pre-check and per-redirect revalidation are the primary SSRF defense;
+    this peer inspection is a best-effort extra layer, not a guarantee."""
     try:
         sock = resp.fp.raw._sock  # noqa: SLF001 — stdlib internals, best available
         peer = sock.getpeername()[0]
-    except Exception:  # noqa: BLE001 — can't verify, don't fail open on that alone
+    except Exception:  # noqa: BLE001 — introspection unavailable: fail open
         return
     try:
         ip = ipaddress.ip_address(peer)
@@ -273,10 +252,10 @@ def _nws_points_url(lat, lng):
 def fill_weather(tdir, lat, lng, deadline_seconds=30):
     """Fetch NWS forecast for the venue coordinates → weather.json draft.
 
-    Total operation deadline (not just per-request timeouts): the points
-    + forecast requests each carry a 20s socket timeout, so a dead NWS
-    could otherwise tie up a server thread for ~40s. deadline_seconds caps
-    the whole fill."""
+    TRUE total operation deadline: the points + forecast requests each
+    carry their own socket timeout, but the forecast request's timeout
+    is capped to the REMAINING budget (min 1s) so a dead NWS can never
+    exceed deadline_seconds for the whole fill."""
     if not lat or not lng:
         raise PlatformError("weather fill needs --lat and --lng (venue coordinates)")
     import time
@@ -288,7 +267,10 @@ def fill_weather(tdir, lat, lng, deadline_seconds=30):
         remaining = deadline_seconds - (time.monotonic() - start)
         if remaining <= 0:
             raise PlatformError("weather fill exceeded total deadline")
-        fc = fetch_json(forecast_url)
+        # The forecast request must not run past the deadline — cap its
+        # socket timeout to the remaining budget (floor 1s so a tiny
+        # remainder still allows a real attempt).
+        fc = fetch_json(forecast_url, timeout=max(1.0, remaining))
     except Exception as e:
         raise PlatformError(f"NWS fetch failed: {e}") from e
 

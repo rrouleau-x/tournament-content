@@ -331,7 +331,7 @@ def test_ui_smoke_csp_and_wiring(admin_env):
                    # new-tournament wizard
                    'function showWizard', 'function wizardNext',
                    'function validateWizardStep', 'function renderWizardReview',
-                   'btn-create'):
+                   'function wizardCompletion', 'btn-create'):
         assert marker in js, f"app.js missing {marker}"
     s, css = req("GET", f"{admin_env['base']}/static/app.css")
     assert s == 200
@@ -832,3 +832,52 @@ def test_wizard_create_fill_flow(admin_env):
         m = json.load(f)
     assert m["status"] == "draft"
     assert "revision" not in m
+
+
+def test_rate_limit_store_eviction_is_bounded(admin_env):
+    """_req_times must never grow past _MAX_TRACKED_IPS: one-time keys
+    with stale timestamps get pruned in a full eviction pass, not just
+    the touched key."""
+    import admin_server as adm
+    import time
+    # Simulate >_MAX_TRACKED_IPS one-time keys, each with a STALE
+    # timestamp list (the exact case the old code failed to prune —
+    # it only cleaned the currently-touched key)
+    with adm._rate_lock:
+        adm._req_times.clear()
+        stale = 0.0  # long before `now` (monotonic)
+        for i in range(adm._MAX_TRACKED_IPS + 500):
+            adm._req_times[f"one-time-ip-{i}"] = [stale]
+        # Touch one key: triggers the eviction pass
+        adm._sliding_allow(adm._req_times, "probe-ip", adm.REQ_LIMIT, adm.REQ_WINDOW)
+        size = len(adm._req_times)
+    assert size <= adm._MAX_TRACKED_IPS, \
+        f"store grew to {size}, cap is {adm._MAX_TRACKED_IPS}"
+
+
+def test_template_has_no_stale_content(admin_env):
+    """The scaffold template must be NEUTRAL: no phone numbers, emails,
+    street addresses, team/tournament names, URLs, or personal data that
+    could leak into a new tournament. (Schema-valid but tournament-
+    specific content is exactly what validation can't catch.)"""
+    import re
+    T = os.path.join(admin_env["content"], "_templates", "tournament-v1")
+    findings = []
+    for fname in sorted(os.listdir(T)):
+        if not fname.endswith(".json") or fname == "manifest.json":
+            continue
+        with open(os.path.join(T, fname), encoding="utf-8") as f:
+            text = f.read()
+        # Skip structural tokens (keys, punctuation) — look for VALUES
+        # that look like real data
+        if re.search(r"\b\d{3}[-.)\s]\d{3}[-.)\s]\d{4}\b", text):
+            findings.append(f"{fname}: phone number pattern")
+        if re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text):
+            findings.append(f"{fname}: email pattern")
+        if re.search(r"\b\d{1,5}\s+[A-Z][A-Za-z]+\s+(St|Street|Ave|Avenue|Rd|Road|Pkwy|Parkway|Dr|Drive|Blvd|Boulevard)\b", text):
+            findings.append(f"{fname}: street-address pattern")
+        if re.search(r"\bhttps?://", text):
+            findings.append(f"{fname}: URL present")
+        if re.search(r"\b(?:19|20)\d{2}\b", text) and fname != "sport.json":
+            findings.append(f"{fname}: year present")
+    assert not findings, f"template contains stale content: {findings}"

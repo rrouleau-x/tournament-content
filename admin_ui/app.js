@@ -830,6 +830,8 @@ async function createTournament() {
 
   // 3. Fill the modules the wizard collected — through the SAME
   //    PUT+baseDigest path the edit view uses (atomic, conflict-safe).
+  //    Track WHICH fields were actually confirmed written: a mid-sequence
+  //    failure must never be reported as full completion.
   const modules = {};
 
   const tournament = { name: f.name };
@@ -854,29 +856,68 @@ async function createTournament() {
   }
   modules["contacts.json"] = { contacts };
 
+  // Which checklist fields each module satisfies (must mirror the
+  // server's _REQUIRED_CONTENT entries for these modules). Only fields
+  // whose values were ACTUALLY entered count — e.g. empty dates are not
+  // in the PUT content, so their checklist entries stay incomplete.
+  const FIELDS_PER_MODULE = {
+    "tournament.json": ["tournament.name"],
+    "team.json": ["team.name"],
+    "venue.json": ["venue.name", "venue.address"],
+    "contacts.json": ["contacts.manager", "contacts.coach"],
+  };
+  if (f.dateStart) FIELDS_PER_MODULE["tournament.json"].push("tournament.dates.start");
+  if (f.dateEnd) FIELDS_PER_MODULE["tournament.json"].push("tournament.dates.end");
+
+  const completedFields = new Set();
+  const failures = [];
   for (const [file, content] of Object.entries(modules)) {
-    const res = await api("PUT", `/api/tournament/${f.org}/${f.slug}/module/${file}`, {
-      content: JSON.stringify(content, null, 2),
-      baseDigest: digests[file],
-    });
-    if (res.error) {
-      flash("Created, but " + file + " save failed: " + res.error, false);
+    // api() THROWS on 401/409/network errors (it flashes the conflict
+    // itself) — catch so a mid-sequence failure still lands in the
+    // accurate completion report below instead of aborting the wizard.
+    let res;
+    try {
+      res = await api("PUT", `/api/tournament/${f.org}/${f.slug}/module/${file}`, {
+        content: JSON.stringify(content, null, 2),
+        baseDigest: digests[file],
+      });
+    } catch (e) {
+      failures.push({ file, error: String(e && e.message || e) });
       break;
     }
+    if (res.error) {
+      failures.push({ file, error: res.error });
+      break; // later modules still need the digests we have — stop and report
+    }
+    (FIELDS_PER_MODULE[file] || []).forEach(fld => completedFields.add(fld));
   }
 
-  // 4. Report what's still empty (the template checklist minus what the
-  //    wizard just filled) and land in the edit view.
-  const remaining = (d.checklist || []).filter(c =>
-    !["tournament.name", "tournament.dates.start", "tournament.dates.end",
-      "team.name", "venue.name", "venue.address",
-      "contacts.manager", "contacts.coach"].includes(c.field));
-  if (remaining.length) {
-    flash("Draft created — optional fields to fill: " + remaining.map(c => c.field).join(", "));
+  // 4. The remaining checklist = server checklist MINUS only the fields
+  //    whose module write was CONFIRMED (a failed PUT means that module's
+  //    fields are still empty, whatever the server's template said).
+  const completion = wizardCompletion(d.checklist, completedFields, failures);
+  if (completion.failures.length) {
+    const failedNames = completion.failures.map(x => x.file).join(", ");
+    flash(`Created ${d.tournament}, but setup is INCOMPLETE — ` +
+          `failed to save: ${failedNames}. ` +
+          (completion.remaining.length ? `Still to fill: ${completion.remaining.map(c => c.field).join(", ")}. ` : "") +
+          "The draft is open below — re-save those modules (Retry) and validate before publishing.",
+          false);
+  } else if (completion.remaining.length) {
+    flash("Draft created — optional fields to fill: " + completion.remaining.map(c => c.field).join(", "));
   } else {
     flash("Draft created — all required fields set. Validate, approve, publish when ready.");
   }
   showEdit(f.org, f.slug);
+}
+
+// Pure helper (node-testable): the wizard completion decision. Takes the
+// server checklist, the set of fields whose module writes were CONFIRMED,
+// and any failures. A failed module write must NOT have its fields counted
+// as complete — whatever the template checklist said.
+function wizardCompletion(checklist, completedFields, failures) {
+  const remaining = (checklist || []).filter(c => !completedFields.has(c.field));
+  return { failures: failures || [], remaining };
 }
 
 async function loadList() {

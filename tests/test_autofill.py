@@ -94,7 +94,7 @@ def test_weather_fill_mocked_nws(scratch, monkeypatch):
 
     calls = {}
 
-    def fake_fetch_json(url):
+    def fake_fetch_json(url, timeout=20):
         calls["url"] = url
         if "/points/" in url:
             return {"properties": {"forecast": "https://api.weather.gov/fake/forecast"}}
@@ -130,15 +130,16 @@ def test_weather_fill_mocked_nws(scratch, monkeypatch):
 
 
 def test_weather_fill_restores_on_compile_exception(scratch, monkeypatch):
-    """If compilation raises after the candidate is installed, the original
-    module must be restored (regression: exception path left candidate in
-    place)."""
+    """If compilation raises during validation, the candidate must NEVER
+    reach disk (regression: the old design wrote the candidate first and
+    restored on failure; the new design validates IN MEMORY before any
+    write, so a raise leaves the original untouched)."""
     from autofill import fill_weather
     import compile as compile_mod
 
     before = open(os.path.join(scratch, "weather.json")).read()
 
-    def fake_fetch_json(url):
+    def fake_fetch_json(url, timeout=20):
         if "/points/" in url:
             return {"properties": {"forecast": "https://api.weather.gov/fake/forecast"}}
         return {"properties": {"periods": [
@@ -146,7 +147,7 @@ def test_weather_fill_restores_on_compile_exception(scratch, monkeypatch):
              "temperatureUnit": "F", "windSpeed": "8 mph",
              "shortForecast": "Sunny"}]}}
 
-    def boom(tdir):
+    def boom(tdir, overrides=None):
         raise RuntimeError("simulated compile failure")
 
     import autofill

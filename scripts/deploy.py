@@ -308,17 +308,24 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
                     f"and the mirror was NOT updated. Fix the push problem "
                     f"(auth, remote URL, branch protection) and re-run deploy.",
                     exit_code=EXIT_PUBLISH)
+            # THE REMOTE IS NOW LIVE. From this instant, nothing may roll
+            # the local clone back: a verification failure below means the
+            # remote may still be published, so resetting the worktree
+            # would hide that. pushed=True is set IMMEDIATELY on push
+            # success — the post-push verification is a warning path, not
+            # a rollback path.
+            pushed = True
 
             # Post-push verification: local HEAD must equal origin/main.
-            # From this point the REMOTE IS LIVE — nothing can roll back
-            # publication. Failures after this are warnings, never resets.
+            # A failure here means "remote may be live but verification
+            # failed" — reported as an error, NEVER a reset.
             rc, local_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
             rc2, remote_head, _ = run(["git", "rev-parse", "origin/main"], cwd=workdir)
             if rc != 0 or rc2 != 0 or local_head != remote_head:
                 raise PlatformError(
-                    "push reported ok but local HEAD ≠ origin/main — check the repo "
+                    "push reported ok but local HEAD ≠ origin/main — the "
+                    "remote is live and was NOT rolled back. Check the repo "
                     "manually before trusting publication.", exit_code=EXIT_PUBLISH)
-            pushed = True
 
             # SUCCESS — only now update the mirror, atomically. A mirror
             # failure must NOT flip the result to failure (the remote IS

@@ -373,3 +373,41 @@ def test_mirror_failure_after_push_is_warning_not_reset(app_repo, valid_target, 
     assert head == remote, "clone was reset after a successful push!"
     # Local worktree is clean (the publish commit is present, not rolled back)
     assert git(workdir, "status", "--porcelain") == ""
+
+
+def test_post_push_verification_failure_never_resets_clone(
+        app_repo, valid_target, monkeypatch):
+    """The pushed flag must be set IMMEDIATELY on push success. If the
+    post-push HEAD==origin/main verification then fails, the remote may
+    still be live — the local clone must NEVER be reset (the old bug:
+    pushed was set only AFTER verification, so a verification failure
+    after a successful push triggered a rollback that hid publication)."""
+    import deploy as deploy_mod
+
+    real_run = deploy_mod.run
+    # Intercept ONLY the post-push `rev-parse origin/main` verification
+    # call and make it return a mismatched SHA — simulating a stale/
+    # failed verification AFTER the push already succeeded. All other
+    # git calls behave normally (fetch, add, commit, push, rev-parse HEAD).
+    def fake_run(cmd, cwd=None):
+        if cmd == ["git", "rev-parse", "origin/main"]:
+            return (0, "f" * 40, "")
+        return real_run(cmd, cwd=cwd)
+
+    monkeypatch.setattr(deploy_mod, "run", fake_run)
+
+    from pipeline import EXIT_PUBLISH
+    with pytest.raises(PlatformError) as ei:
+        deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target)
+    assert ei.value.exit_code == EXIT_PUBLISH
+    assert "NOT rolled back" in str(ei.value), str(ei.value)
+
+    # The push DID succeed: the bare origin holds the new bundle
+    remote = read_remote(app_repo["workdir"])
+    assert remote["tournament"]["name"] == "Sporting Jax Boys Invitational"
+    # The local clone was NOT reset behind the remote: its HEAD contains
+    # the published bundle too (a rollback would have removed it)
+    local = json.loads(git(app_repo["workdir"], "show", "HEAD:app/data.json"))
+    assert local["tournament"]["name"] == "Sporting Jax Boys Invitational"
+    # And the worktree is still the published state — no partial reset
+    assert git(app_repo["workdir"], "status", "--porcelain") == ""

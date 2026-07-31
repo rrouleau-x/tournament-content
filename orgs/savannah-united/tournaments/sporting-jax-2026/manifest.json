@@ -1,0 +1,15 @@
+{
+  "org": "savannah-united",
+  "slug": "sporting-jax-2026",
+  "schemaVersion": 1,
+  "status": "live",
+  "sport": "soccer",
+  "name": "Sporting Jax Boys Invitational",
+  "shortName": "Sporting Jax",
+  "dates": {
+    "start": "2026-08-22",
+    "end": "2026-08-23"
+  },
+  "compiledFrom": "data.json",
+  "createdAt": "2026-07-31T12:55:15Z"
+}

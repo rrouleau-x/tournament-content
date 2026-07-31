@@ -71,3 +71,22 @@
 /* ── Form validation ─────────────────────────────────────────────────── */
 .field-err { color: #d64545; font-size: 12px; }
 input.invalid, textarea.invalid, select.invalid { border-color: #d64545 !important; }
+
+/* ── Form layout classes (no inline styles — CSP style-src is 'self') ── */
+.form-toggle-wrap { margin-bottom: 8px; }
+.rep-row.row-direction { flex-direction: row; }
+.kv-key { width: 40%; }
+.kv-val { width: 60%; }
+.kv-err { width: 100%; }
+.history-row { cursor: pointer; border-bottom: 1px solid var(--border); padding: 6px 0; }
+.history-msg { font-weight: 600; }
+
+/* ── Layout helpers (replaces inline style= — CSP style-src is 'self') ── */
+.clickable { cursor: pointer; }
+.row-gap-md { margin-bottom: 14px; }
+.row-gap-sm { margin-bottom: 10px; }
+.h2-flat { margin: 0; }
+.card-narrow { max-width: 520px; }
+.grid-gap-sm { gap: 10px; }
+.input-std { padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.card-gap-top { margin-top: 16px; }

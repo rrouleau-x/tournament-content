@@ -174,7 +174,7 @@ function renderModuleEditor() {
     // Form view (default) with a toggle to the raw JSON editor
     editor.classList.add("hidden");
     toggleWrap.className = "row";
-    toggleWrap.style.marginBottom = "8px";
+    toggleWrap.className = "row form-toggle-wrap";
     const toggle = document.createElement("button");
     toggle.className = "btn-ghost";
     toggle.textContent = state.showForm ? "Raw JSON" : "Form view";
@@ -453,16 +453,14 @@ function renderField(f, data, rowIndex) {
     const obj = (value && typeof value === "object") ? value : {};
     Object.keys(obj).forEach((k) => {
       const row = document.createElement("div");
-      row.className = "rep-row";
-      row.style.flexDirection = "row";
+      row.className = "rep-row row-direction";
       const kIn = document.createElement("input");
       kIn.type = "text";
       kIn.value = k;
-      kIn.style.width = "40%";
+      kIn.className = "kv-key";
       kIn.placeholder = "Field #";
       const errEl = document.createElement("span");
-      errEl.className = "field-err hidden";
-      errEl.style.width = "100%";
+      errEl.className = "field-err hidden kv-err";
       kIn.oninput = () => {
         const newKey = kIn.value.trim();
         if (newKey === k) { errEl.classList.add("hidden"); kIn.classList.remove("invalid"); return; }
@@ -485,7 +483,7 @@ function renderField(f, data, rowIndex) {
       const vIn = document.createElement("input");
       vIn.type = "text";
       vIn.value = obj[k];
-      vIn.style.width = "60%";
+      vIn.className = "kv-val";
       vIn.placeholder = "Note…";
       vIn.oninput = () => { obj[k] = vIn.value; state.dirty = true; $("e-saved").classList.add("hidden"); };
       const rm = document.createElement("button");
@@ -765,15 +763,12 @@ async function toggleHistory() {
   diffEl.textContent = "";
   (d.history || []).forEach((c) => {
     const row = document.createElement("div");
-    row.className = "row";
-    row.style.cursor = "pointer";
-    row.style.borderBottom = "1px solid var(--border)";
-    row.style.padding = "6px 0";
+    row.className = "row history-row";
     const info = document.createElement("div");
     info.className = "grow";
     const msg = document.createElement("div");
+    msg.className = "history-msg";
     msg.textContent = c.message || "(no message)";
-    msg.style.fontWeight = "600";
     const meta = document.createElement("div");
     meta.className = "muted";
     meta.textContent = `${c.sha.slice(0, 10)} · ${c.date} · ${c.author}`;

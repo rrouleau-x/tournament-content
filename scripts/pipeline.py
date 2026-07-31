@@ -141,22 +141,25 @@ def write_revision(tdir, workflow, digest, reviewer=None, manifest=None,
     from datetime import datetime, timezone
     manifest_path = os.path.join(tdir, "manifest.json")
     manifest = manifest if manifest is not None else load_manifest(tdir)
-    if expected_manifest_digest is not None:
-        with open(manifest_path, encoding="utf-8") as f:
-            current_raw = f.read()
-        if hashlib.sha256(current_raw.encode("utf-8")).hexdigest()[:16] \
-                != expected_manifest_digest:
-            raise PlatformError(
-                "manifest changed since it was loaded — another actor edited "
-                "it concurrently. Reload and retry the approval/publication.")
     # Mutually exclude concurrent revision writers (approve + publish +
     # record_published can otherwise race on the whole-file RMW).
     with open(manifest_path, "a", encoding="utf-8") as lock_f:
         fcntl.flock(lock_f, fcntl.LOCK_EX)
         try:
             # Re-read under the lock: the file may have changed since the
-            # CAS check above.
-            manifest = load_manifest(tdir)
+            # caller loaded it. The CAS check happens HERE, under the
+            # flock — checking before acquiring it would leave a TOCTOU
+            # window where another actor modifies the manifest between
+            # the check and the lock.
+            with open(manifest_path, encoding="utf-8") as f:
+                current_raw = f.read()
+            if expected_manifest_digest is not None:
+                if hashlib.sha256(current_raw.encode("utf-8")).hexdigest()[:16] \
+                        != expected_manifest_digest:
+                    raise PlatformError(
+                        "manifest changed since it was loaded — another actor edited "
+                        "it concurrently. Reload and retry the approval/publication.")
+            manifest = json.loads(current_raw)
             rev = dict(manifest.get("revision") or {})
             rev["workflow"] = workflow
             rev["digest"] = digest

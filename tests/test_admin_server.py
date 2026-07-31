@@ -67,6 +67,11 @@ def admin_env(tmp_path, monkeypatch):
     monkeypatch.setattr(deploy_mod, "REPO_ROOT", str(scratch))
     monkeypatch.setattr(pipeline, "REPO_ROOT", str(scratch))
     monkeypatch.setattr(compile_mod, "REPO_ROOT", str(scratch))
+    # Per-IP rate-limit stores are module-level and would accumulate
+    # across tests in one process — clear them so the suite never trips
+    # the request cap.
+    monkeypatch.setattr(admin_server, "_req_times", {})
+    monkeypatch.setattr(admin_server, "_fail_counts", {})
 
     # Rewrite _targets.json → temp app repo (isolate from real deploys)
     targets_path = os.path.join(scratch, "_targets.json")
@@ -299,9 +304,14 @@ def test_ui_smoke_csp_and_wiring(admin_env):
     assert "onclick=" not in html
     assert "<script>" not in html
     assert 'src="/static/app.js"' in html
+    # No inline styles anywhere — the CSP is style-src 'self' (no
+    # 'unsafe-inline'), so any style= attribute or .style.* JS write
+    # would be silently blocked and the UI would break.
+    assert "style=" not in html
 
     s, js = req("GET", f"{admin_env['base']}/static/app.js")
     assert s == 200
+    assert ".style." not in js
     for marker in ('wire("btn-save"', 'wire("btn-publish"', 'DOMContentLoaded',
                    'showList', 'confirmDiscardChanges',
                    # Phase 3 form engine wiring
@@ -312,7 +322,7 @@ def test_ui_smoke_csp_and_wiring(admin_env):
                    'function validateField', 'function validateAll',
                    'state.formErrors', 'keyvalue',
                    # revision history
-                   'function toggleHistory', 'btn-history-close', 'e-history-card'):
+                   'function toggleHistory', 'e-history-card', 'history-row'):
         assert marker in js, f"app.js missing {marker}"
     s, css = req("GET", f"{admin_env['base']}/static/app.css")
     assert s == 200
@@ -715,3 +725,45 @@ def test_manifest_module_save_rejected(admin_env):
                      "content": json.dumps({"status": "live"})})
     assert s == 400, d
     assert "workflow" in d["error"]
+
+
+def test_failed_auth_throttle(admin_env):
+    """After AUTH_FAIL_LIMIT unauthorized attempts from one IP, the
+    server must answer 429 (not 401) until the window expires. A VALID
+    credential always succeeds — behind a tunnel all clients share one
+    IP, so an IP lockout would self-DoS the real admin; the throttle
+    slows guessing without ever locking out a legitimate token."""
+    import admin_server as adm
+    base = admin_env["base"]
+    # First AUTH_FAIL_LIMIT attempts → 401
+    for _ in range(adm.AUTH_FAIL_LIMIT):
+        s, _d = req("GET", f"{base}/api/tournaments", token="wrong-token")
+        assert s == 401
+    # Next wrong-token attempt → throttled
+    s, _d = req("GET", f"{base}/api/tournaments", token="wrong-token")
+    assert s == 429, f"expected 429 after throttle, got {s}"
+    # A VALID token is NOT throttled (the lock is on failed attempts,
+    # never on credentials that succeed)
+    s, _d = req("GET", f"{base}/api/tournaments",
+                token=admin_env["admin_token"])
+    assert s == 200
+    # After the window expires, wrong tokens get 401 again
+    import time
+    with adm._rate_lock:
+        adm._fail_counts.clear()
+    s, _d = req("GET", f"{base}/api/tournaments", token="wrong-token")
+    assert s == 401
+
+
+def test_request_rate_cap(admin_env):
+    """More than REQ_LIMIT requests per window from one IP → 429."""
+    import admin_server as adm
+    import time
+    base = admin_env["base"]
+    token = admin_env["admin_token"]
+    # Drive the per-IP request store to the cap with CURRENT timestamps
+    # (monotonic 0 would look stale and be evicted immediately)
+    with adm._rate_lock:
+        adm._req_times["127.0.0.1"] = [time.monotonic()] * adm.REQ_LIMIT
+    s, _d = req("GET", f"{base}/api/tournaments", token=token)
+    assert s == 429, f"expected 429 over cap, got {s}"

@@ -9,13 +9,13 @@
 <body>
 <header>
   <h1>Tournament Admin</h1>
-  <span class="sub" id="btn-logout" style="cursor:pointer" title="Clear saved tokens">logout</span>
+  <span class="sub clickable" id="btn-logout" title="Clear saved tokens">logout</span>
 </header>
 
 <div class="wrap" id="view-list">
   <div class="card">
-    <div class="row" style="margin-bottom:14px">
-      <h2 class="grow" style="margin:0">Tournaments</h2>
+    <div class="row row-gap-md">
+      <h2 class="grow h2-flat">Tournaments</h2>
       <button class="btn-blue" id="btn-new">+ New Tournament</button>
     </div>
     <table>
@@ -26,12 +26,12 @@
 </div>
 
 <div class="wrap hidden" id="view-new">
-  <div class="card" style="max-width:520px">
+  <div class="card card-narrow">
     <h2>New Tournament</h2>
-    <div class="grid" style="gap:10px">
-      <input id="n-org" placeholder="org (e.g. savannah-united)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-      <input id="n-slug" placeholder="slug (e.g. disney-showcase-2027)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-      <input id="n-name" placeholder="display name (optional)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+    <div class="grid grid-gap-sm">
+      <input id="n-org" placeholder="org (e.g. savannah-united)" class="input-std">
+      <input id="n-slug" placeholder="slug (e.g. disney-showcase-2027)" class="input-std">
+      <input id="n-name" placeholder="display name (optional)" class="input-std">
     </div>
     <div class="actions">
       <button class="btn-blue" id="btn-create">Create</button>
@@ -41,15 +41,15 @@
 </div>
 
 <div class="wrap hidden" id="view-edit">
-  <div class="row" style="margin-bottom:14px">
+  <div class="row row-gap-md">
     <button class="btn-ghost" id="btn-back">← All tournaments</button>
-    <h2 class="grow" id="e-title" style="margin:0"></h2>
+    <h2 class="grow h2-flat" id="e-title"></h2>
     <span id="e-status" class="badge"></span>
   </div>
   <div id="e-statusbar" class="statusbar"></div>
   <div class="tabs" id="e-tabs"></div>
   <div class="card">
-    <div class="row" style="margin-bottom:10px">
+    <div class="row row-gap-sm">
       <span class="muted grow" id="e-module-desc"></span>
       <span class="saved hidden" id="e-saved">✓ saved</span>
     </div>
@@ -64,13 +64,13 @@
       <button class="btn-ghost" id="btn-autofill" title="AI-assisted fill for this module">Autofill</button>
     </div>
   </div>
-  <div class="card hidden" id="e-report-card" style="margin-top:16px">
+  <div class="card hidden card-gap-top" id="e-report-card">
     <h2>Guide Health Report</h2>
     <pre class="report" id="e-report"></pre>
   </div>
-  <div class="card hidden" id="e-history-card" style="margin-top:16px">
+  <div class="card hidden card-gap-top" id="e-history-card">
     <div class="row">
-      <h2 class="grow" style="margin:0">Revision History</h2>
+      <h2 class="grow h2-flat">Revision History</h2>
       <button class="btn-ghost" id="btn-history-close">Close</button>
     </div>
     <div id="e-history-list"></div>

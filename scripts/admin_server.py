@@ -16,8 +16,20 @@ SECURITY MODEL (per external design review — internet-facing):
     All paths are realpath-resolved and containment-checked.
   - No /static/ file handler (UI is a single HTML file). The only file
     served is admin_ui/index.html — nothing else can be read via the server.
-  - Request bodies limited to 1 MB. Responses carry a restrictive CSP.
+  - Request bodies limited to 1 MB. Responses carry a restrictive CSP
+    (script-src 'self', style-src 'self' — no inline script or styles).
+  - Per-IP rate limiting: request cap + failed-auth throttle (429). Note:
+    behind a localhost tunnel all clients share 127.0.0.1, so these bound
+    TOTAL abuse rather than per-user — valid credentials always succeed.
   - Every state-changing action is written to out/audit.log (append-only).
+
+LOCK SCOPE (single-process): the module stripe pool and the in-process
+audit lock are threading.Lock() — they serialize threads of THIS server
+process only. The deploy workdir lock and content-repo lock are fcntl
+flock() (cross-process, keyed by path) so CLI + server + tests serialize
+correctly. Deploying multiple server processes (e.g. behind a load
+balancer) would need the module-save path to use a cross-process flock
+as well; the current single ThreadingHTTPServer is the supported shape.
 
 Usage:
     ADMIN_TOKEN=... PUBLISH_TOKEN=... python3 scripts/admin_server.py [--port 8899]
@@ -59,6 +71,69 @@ TOKEN_FILE = os.path.join(REPO_ROOT, ".admin-token")
 PUBLISH_TOKEN_FILE = os.path.join(REPO_ROOT, ".publish-token")
 AUDIT_LOG = os.path.join(REPO_ROOT, "out", "audit.log")
 MAX_BODY = 1_000_000  # 1 MB
+# Per-IP rate limiting (the server is reachable via a public tunnel, so
+# unauthenticated abuse and credential stuffing are real threats):
+#   - failed-auth throttle: > AUTH_FAIL_LIMIT failures in AUTH_FAIL_WINDOW
+#     seconds → 429 with Retry-After (blocks brute force)
+#   - request cap: > REQ_LIMIT requests per REQ_WINDOW seconds per IP →
+#     429 (cheap DoS guard). Both are in-memory sliding windows keyed by
+#     client IP; bounded by _rate_limit() eviction.
+AUTH_FAIL_LIMIT = 5
+AUTH_FAIL_WINDOW = 60          # seconds
+REQ_LIMIT = 300
+REQ_WINDOW = 60                # seconds
+_rate_lock = threading.Lock()
+_fail_counts = {}              # ip -> [timestamp, ...]
+_req_times = {}                # ip -> [timestamp, ...]
+_MAX_TRACKED_IPS = 10_000
+
+
+def _client_ip(handler):
+    """Best-effort client IP. Behind a localhost tunnel the peer is
+    usually 127.0.0.1 (all tunnel users share it) — the limiter still
+    bounds total abuse even if it can't separate users."""
+    try:
+        return handler.client_address[0]
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _sliding_allow(store, key, limit, window):
+    """True if key is under limit in the last `window` seconds.
+    Caller must hold _rate_lock. Evicts stale entries and, when the
+    store grows unbounded, drops the least-recently-seen keys."""
+    import time
+    now = time.monotonic()
+    times = store.setdefault(key, [])
+    while times and now - times[0] > window:
+        times.pop(0)
+    if len(store) > _MAX_TRACKED_IPS:
+        # Crude bounded eviction: keep only keys seen in the last window.
+        for k in [k for k in store if not store[k]]:
+            del store[k]
+    if len(times) >= limit:
+        return False
+    times.append(now)
+    return True
+
+
+def _rate_limited(handler):
+    """Enforce the global per-IP request cap. Returns True if the
+    request should be REJECTED (429)."""
+    import time
+    ip = _client_ip(handler)
+    with _rate_lock:
+        return not _sliding_allow(_req_times, ip, REQ_LIMIT, REQ_WINDOW)
+
+
+def _auth_failure_allowed(handler):
+    """True if this IP may still attempt auth (not throttled). Called
+    BEFORE answering 401 so a throttled client gets 429 instead."""
+    import time
+    ip = _client_ip(handler)
+    with _rate_lock:
+        ok = _sliding_allow(_fail_counts, ip, AUTH_FAIL_LIMIT, AUTH_FAIL_WINDOW)
+    return ok
 
 IDENT_RE = r"^[a-z0-9][a-z0-9-]{0,63}$"
 _audit_lock = threading.Lock()
@@ -451,6 +526,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _guard_api(self):
         if not self._authorized():
+            # Failed-auth throttle: after AUTH_FAIL_LIMIT rejections from
+            # one IP in the window, answer 429 instead of 401 so brute
+            # force can't run unlimited guesses. (Behind a tunnel all
+            # clients share 127.0.0.1, so this bounds total guessing.)
+            if not _auth_failure_allowed(self):
+                self._send(429, {"Content-Type": "text/plain",
+                                 "Retry-After": str(AUTH_FAIL_WINDOW)},
+                           b"too many failed auth attempts - try again later")
+                return False
             self._send(*api_err("unauthorized — missing or invalid token", 401))
             return False
         return True
@@ -475,11 +559,15 @@ class Handler(BaseHTTPRequestHandler):
         headers = dict(headers)
         headers.setdefault("Content-Security-Policy",
                            "default-src 'self'; script-src 'self'; "
-                           "style-src 'self' 'unsafe-inline'; connect-src 'self'")
+                           "style-src 'self'; connect-src 'self'")
         headers.setdefault("X-Content-Type-Options", "nosniff")
         self._send(status, headers, body)
 
     def do_GET(self):
+        if _rate_limited(self):
+            return self._send(429, {"Content-Type": "text/plain",
+                                    "Retry-After": str(REQ_WINDOW)},
+                              b"rate limit exceeded - try again shortly")
         path = urlparse(self.path).path
         # Serve ONLY the fixed UI allowlist (index.html, app.css, app.js)
         # with realpath containment — no arbitrary file reads.
@@ -560,6 +648,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(*api_err("not found", 404))
 
     def do_PUT(self):
+        if _rate_limited(self):
+            return self._send(429, {"Content-Type": "text/plain",
+                                    "Retry-After": str(REQ_WINDOW)},
+                              b"rate limit exceeded - try again shortly")
         path = urlparse(self.path).path
         if not self._guard_api():
             return
@@ -654,6 +746,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(*api_err("not found", 404))
 
     def do_POST(self):
+        if _rate_limited(self):
+            return self._send(429, {"Content-Type": "text/plain",
+                                    "Retry-After": str(REQ_WINDOW)},
+                              b"rate limit exceeded - try again shortly")
         path = urlparse(self.path).path
         if not self._guard_api():
             return

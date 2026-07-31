@@ -1,5 +1,7 @@
 {
-  "stayToPlay": false,
-  "official": [],
-  "nonOfficial": []
+  "hotels": {
+    "stayToPlay": false,
+    "official": [],
+    "nonOfficial": []
+  }
 }

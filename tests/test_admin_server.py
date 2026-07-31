@@ -636,8 +636,13 @@ def test_new_tournament_uses_template_not_live_copy(admin_env):
     assert d["checklist"], "expected an incompleteness checklist"
     fields = [c["field"] for c in d["checklist"]]
     assert "tournament.name" in fields
-    assert "tournament.dates" in fields
+    assert "tournament.dates.start" in fields
+    assert "tournament.dates.end" in fields
+    assert "team.name" in fields
     assert "venue.name" in fields
+    assert "venue.address" in fields
+    assert "contacts.manager" in fields
+    assert "contacts.coach" in fields
 
     # The new tournament must NOT contain live Sporting Jax content
     tdir = os.path.join(admin_env["content"], "orgs", "new-org",
@@ -652,3 +657,61 @@ def test_new_tournament_uses_template_not_live_copy(admin_env):
     assert m["slug"] == "disney-showcase-2027"
     assert m["status"] == "draft"
     assert "revision" not in m
+
+
+def test_template_compiles_and_fails_predictably(admin_env):
+    """The scaffold template must COMPILE (correct shapes — no missing
+    keys, no type mismatches) and produce EXACTLY the predictable schema/
+    required failures the checklist reports. A template that can't even
+    compile, or fails on unexpected checks, breaks the guided flow."""
+    import compile as compile_mod
+    from validate import Report, run_checks
+    T = os.path.join(admin_env["content"], "_templates", "tournament-v1")
+    bundle, used, unknown = compile_mod.compile_bundle(T)
+    # All 14 registered modules compile (none missing keys/unknown files)
+    assert len(used) == 14, f"expected all modules to compile, got {used}"
+    assert unknown == []
+    # Bundle has every required top-level key
+    from pipeline import MODULE_REGISTRY
+    for _f, keys, required in MODULE_REGISTRY:
+        if required:
+            for k in keys:
+                assert k in bundle, f"required bundle key {k} missing"
+    report = Report()
+    run_checks(bundle, report, run_link_checks=False, tdir=T)
+    # Exactly the 8 expected failures — no more, no fewer (a change here
+    # means the template or schema drifted and the checklist is stale)
+    fails = report.blocking()
+    messages = {m for _s, _c, m in fails}
+    assert len(fails) == 8, f"expected 8 blocking, got {len(fails)}: {messages}"
+    expected_substrings = [
+        "team/name",
+        "tournament/dates/end",
+        "tournament/dates/start",
+        "tournament/name",
+        "venue/address",
+        "venue/name",
+        "Team manager contact",
+        "Head coach contact",
+    ]
+    for sub in expected_substrings:
+        assert any(sub in m for m in messages), f"missing expected failure: {sub}"
+
+
+def test_manifest_module_save_rejected(admin_env):
+    """manifest.json is workflow-managed: neither a raw save nor a
+    validate-proposed against it may go through the module endpoint."""
+    token = admin_env["admin_token"]
+    base = admin_env["base"]
+    tdir = f"{base}/api/tournament/savannah-united/sporting-jax-2026"
+
+    s, d = req("PUT", f"{tdir}/module/manifest.json", token=token,
+               body={"content": json.dumps({"status": "live"})})
+    assert s == 400, d
+    assert "workflow" in d["error"]
+
+    s, d = req("PUT", f"{tdir}/module/manifest.json", token=token,
+               body={"action": "validate-proposed",
+                     "content": json.dumps({"status": "live"})})
+    assert s == 400, d
+    assert "workflow" in d["error"]

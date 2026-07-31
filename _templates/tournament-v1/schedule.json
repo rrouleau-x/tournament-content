@@ -1,4 +1,5 @@
 {
+  "games": [],
   "scheduleStatus": "pending",
-  "games": []
+  "scheduleExpected": ""
 }

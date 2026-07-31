@@ -1,3 +1,6 @@
 {
-  "venue": {}
+  "venue": {
+    "name": "",
+    "address": ""
+  }
 }

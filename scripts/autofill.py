@@ -241,20 +241,30 @@ def fetch_text(url):
 
 # NWS point metadata (lat/lng → forecast URL) changes infrequently —
 # cache it so repeated fills of the same venue skip the first request.
-# Bounded: clear when it exceeds 256 entries.
-_nws_points_cache = {}
+# Bounded LRU with TTL: evicting just the least-recently-used entry on
+# overflow (a clear-all at 256 entries would thrash for a server with
+# many venues) and re-resolving after NWS_POINTS_TTL.
+import time as _time
+from collections import OrderedDict
+
+_nws_points_cache = OrderedDict()
 _NWS_POINTS_CACHE_MAX = 256
+_NWS_POINTS_TTL = 7 * 24 * 3600  # 7 days
 
 
 def _nws_points_url(lat, lng):
     key = (round(float(lat), 4), round(float(lng), 4))
-    if key in _nws_points_cache:
-        return _nws_points_cache[key]
+    now = _time.time()
+    hit = _nws_points_cache.get(key)
+    if hit is not None and now - hit[1] < _NWS_POINTS_TTL:
+        _nws_points_cache.move_to_end(key)
+        return hit[0]
     points = fetch_json(NWS_POINTS.format(lat=key[0], lng=key[1]))
     url = points["properties"]["forecast"]
-    if len(_nws_points_cache) >= _NWS_POINTS_CACHE_MAX:
-        _nws_points_cache.clear()
-    _nws_points_cache[key] = url
+    _nws_points_cache[key] = (url, now)
+    _nws_points_cache.move_to_end(key)
+    while len(_nws_points_cache) > _NWS_POINTS_CACHE_MAX:
+        _nws_points_cache.popitem(last=False)  # evict LRU, not everything
     return url
 
 

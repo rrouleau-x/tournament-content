@@ -572,6 +572,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.isdir(tdir):
                     return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
                 fpath = safe_module_path(tdir, module)
+                if module == "manifest.json":
+                    # The manifest carries status + revision (the publish
+                    # gate). It is managed ONLY by the approve/publish
+                    # workflow — a raw save here could flip status to
+                    # 'live' or clobber revision state outside the gate.
+                    return self._send(*api_err(
+                        "manifest.json is managed by the approve/publish "
+                        "workflow and cannot be edited directly", 400))
                 body = self._read_json()
                 action = body.get("action")
                 if action == "validate-proposed":
@@ -582,6 +590,14 @@ class Handler(BaseHTTPRequestHandler):
                     # request can ever observe the candidate as real content.
                     from compile import compile_bundle
                     from validate import Report, run_checks
+                    if module == "manifest.json":
+                        # Not a content module: compile_bundle's overlay
+                        # only applies to MODULE_REGISTRY files, so a
+                        # manifest override would be silently ignored and
+                        # the admin would see results for the REAL manifest.
+                        return self._send(*api_err(
+                            "manifest.json is not a content module — it is "
+                            "managed by the approve/publish workflow", 400))
                     content = body.get("content")
                     if content is None:
                         return self._send(*api_err("missing 'content' in body"))
@@ -833,32 +849,47 @@ def approve_tournament(tdir, reviewer="admin"):
 
 # Required content modules for a publishable tournament — checked at
 # scaffold time so a new tournament starts with a visible TODO list.
+# Each entry is (module file, dotted JSON path). The list mirrors what a
+# fresh template actually fails on (verified against the schema): every
+# schema-required non-empty field + every REQUIRED_FIELDS contact.
 _REQUIRED_CONTENT = [
-    ("tournament.json", "tournament", "name"),
-    ("tournament.json", "tournament", "dates"),
-    ("tournament.json", "tournament", "hostClub"),
-    ("venue.json", "venue", "name"),
-    ("venue.json", "venue", "address"),
-    ("contacts.json", "contacts", "manager"),
-    ("schedule.json", "scheduleStatus", None),  # must not be empty/pending forever
+    ("tournament.json", "tournament.name"),
+    ("tournament.json", "tournament.dates.start"),
+    ("tournament.json", "tournament.dates.end"),
+    ("team.json", "team.name"),
+    ("venue.json", "venue.name"),
+    ("venue.json", "venue.address"),
+    ("contacts.json", "contacts.manager"),
+    ("contacts.json", "contacts.coach"),
 ]
+
+
+def _deep_get(mod, dotted):
+    cur = mod
+    for part in dotted.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    return cur
 
 
 def _scaffold_checklist(tdir):
     """Which required fields are still empty after scaffolding — returned
-    with the new-tournament response so the admin knows what to fill."""
+    with the new-tournament response so the admin knows what to fill.
+    Mirrors the template's real validation failures: an empty value here
+    is exactly what the Guide Health Report will flag."""
     missing = []
-    for fname, key, sub in _REQUIRED_CONTENT:
+    for fname, dotted in _REQUIRED_CONTENT:
         try:
             with open(os.path.join(tdir, fname), encoding="utf-8") as f:
                 mod = json.load(f)
         except (OSError, ValueError):
-            missing.append({"module": fname, "field": f"{key}.{sub}" if sub else key,
+            missing.append({"module": fname, "field": dotted,
                             "status": "missing"})
             continue
-        val = mod.get(key) if sub is None else (mod.get(key) or {}).get(sub)
+        val = _deep_get(mod, dotted)
         if val in (None, "", [], {}):
-            missing.append({"module": fname, "field": f"{key}.{sub}" if sub else key,
+            missing.append({"module": fname, "field": dotted,
                             "status": "empty"})
     return missing
 

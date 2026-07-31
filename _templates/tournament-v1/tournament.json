@@ -1,7 +1,9 @@
 {
   "tournament": {
     "name": "",
-    "dates": "",
-    "hostClub": ""
+    "dates": {
+      "start": "",
+      "end": ""
+    }
   }
 }

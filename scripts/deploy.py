@@ -28,6 +28,7 @@ Usage:
 """
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -35,6 +36,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -52,6 +55,48 @@ from pipeline import (  # noqa: E402
     tournament_dir,
 )
 from validate import Report, run_checks  # noqa: E402
+
+
+# ── Deploy serialization ────────────────────────────────────────────────
+# deploy_tournament() runs the whole workDir git sequence (clean-check →
+# add → commit → push → verify → mirror) with no mutex. The admin server
+# is a ThreadingHTTPServer: two publishes (or a CLI run + a server click)
+# can both pass the clean-worktree check, then race writing the same on-
+# disk clone. Worst case: interleaved file content between the write and
+# `git add` of two concurrent requests — a real risk to the "app shell is
+# sacred, publish is transactional" guarantee.
+#
+# Fix: an exclusive per-workDir lock held for the whole critical section.
+# flock() is a kernel lock — it serializes threads AND separate processes
+# (CLI guide.py vs admin server). The lock file lives OUTSIDE the workdir
+# so it never appears in `git status` and can't trip the clean-worktree
+# gate. Dry-runs don't need it (they never touch the workdir).
+_deploy_locks = {}
+_deploy_locks_guard = threading.Lock()
+
+
+def _deploy_lock_path(workdir):
+    """Stable per-workdir lock file under /tmp — outside any git repo."""
+    lock_dir = os.path.join(tempfile.gettempdir(), "tournament-deploy-locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    safe = hashlib.sha256(os.path.realpath(workdir).encode()).hexdigest()[:16]
+    return os.path.join(lock_dir, f"deploy-{safe}.lock")
+
+
+@contextmanager
+def _deploy_lock(workdir):
+    """Exclusive cross-process lock around the publish critical section."""
+    path = _deploy_lock_path(workdir)
+    with _deploy_locks_guard:
+        if path not in _deploy_locks:
+            _deploy_locks[path] = threading.Lock()
+    with _deploy_locks[path]:          # same-process threads
+        with open(path, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)   # cross-process (CLI + server)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def run(cmd, cwd=None):
@@ -176,122 +221,135 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
     app_path = target["appPath"]
     git_data = os.path.join(workdir, *app_path.split("/"))
 
-    # 5. Fetch + semantic diff vs origin/main
-    rc, _, err = run(["git", "fetch", "origin"], cwd=workdir)
-    if rc != 0:
-        raise PlatformError(f"git fetch failed in {workdir}: {err or 'unknown error'}",
-                            exit_code=EXIT_PUBLISH)
-    remote = remote_bundle(workdir, app_path)
-    if remote is None:
-        changed = True
-        diff_note = "no previous bundle at origin/main — initial publish"
-    else:
-        try:
-            live = json.loads(remote)
-            changed = live != bundle_data
-        except json.JSONDecodeError:
-            changed = True
-            diff_note = "remote data.json unreadable — treating as change"
-        else:
-            diff_note = ("content differs" if changed
-                         else "semantically identical — no content change")
-
-    # 6. Dry-run or no-op
-    if dry_run or not changed:
-        status = "dryrun" if dry_run and changed else "noop"
-        msg = (f"(dry-run) would write {app_path} in {workdir} and push to "
-               f"{target['repo']}" if status == "dryrun"
-               else "nothing to publish — app repo untouched")
-        return DeployResult(status, msg, EXIT_OK, tournament, digest=digest,
-                            changed=changed, warnings=summary["warnings"],
-                            destination=f"{target['repo']}/{app_path}")
-
-    # 7. Publish — transactionally
-    # Save starting HEAD for rollback (worktree was verified clean, so a
-    # hard reset to this commit fully restores file + index + branch).
-    rc, start_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
-    start_head = start_head if rc == 0 else None
-
-    try:
-        os.makedirs(os.path.dirname(git_data), exist_ok=True)
-        with open(git_data, "w", encoding="utf-8") as f:
-            f.write(output)
-
-        # Explicit pathspec — never `git add -A`
-        rc, _, err = run(["git", "add", "--", app_path], cwd=workdir)
+    # 5-7. The ENTIRE shared-workdir section (fetch → diff → publish →
+    # mirror → record) runs under an exclusive per-workDir lock — a
+    # ThreadingHTTPServer can serve concurrent publishes, and a CLI
+    # run can race the server: without serialization two requests can
+    # both pass the clean-worktree check and interleave writes into
+    # the same clone. flock() covers threads AND processes.
+    def _locked_publish():
+        # 5. Fetch + semantic diff vs origin/main
+        rc, _, err = run(["git", "fetch", "origin"], cwd=workdir)
         if rc != 0:
-            raise PlatformError(f"git add failed: {err}", exit_code=EXIT_PUBLISH)
-
-        # Verify the staged diff contains EXACTLY the permitted path
-        rc, staged, _ = run(["git", "diff", "--cached", "--name-only"], cwd=workdir)
-        if rc != 0 or staged != app_path:
-            raise PlatformError(
-                f"staged diff is not exactly '{app_path}' — got: {staged or '(empty)'}. "
-                f"Aborting to protect the app shell.", exit_code=EXIT_PUBLISH)
-
-        msg = message or f"data: publish {slug} bundle (digest {digest[:10]})"
-        rc, _, err = run(["git", "commit", "-m", msg, "--", app_path], cwd=workdir)
-        if rc != 0:
-            raise PlatformError(f"git commit failed: {err} (nothing was pushed)",
+            raise PlatformError(f"git fetch failed in {workdir}: {err or 'unknown error'}",
                                 exit_code=EXIT_PUBLISH)
-
-        rc, _, err = run(["git", "push", "origin", "main"], cwd=workdir)
-        if rc != 0:
-            raise PlatformError(
-                f"git push FAILED: {err}\n"
-                f"The local worktree has been rolled back to its starting state "
-                f"and the mirror was NOT updated. Fix the push problem "
-                f"(auth, remote URL, branch protection) and re-run deploy.",
-                exit_code=EXIT_PUBLISH)
-
-        # Post-push verification: local HEAD must equal origin/main
-        rc, local_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
-        rc2, remote_head, _ = run(["git", "rev-parse", "origin/main"], cwd=workdir)
-        if rc != 0 or rc2 != 0 or local_head != remote_head:
-            raise PlatformError(
-                "push reported ok but local HEAD ≠ origin/main — check the repo "
-                "manually before trusting publication.", exit_code=EXIT_PUBLISH)
-
-        # SUCCESS — only now update the mirror, atomically
-        mirror = target.get("mirrorTo")
-        if mirror:
-            mirror_path = os.path.expanduser(mirror)
-            os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(mirror_path),
-                                       prefix=".data.json.tmp.")
+        remote = remote_bundle(workdir, app_path)
+        if remote is None:
+            changed = True
+            diff_note = "no previous bundle at origin/main — initial publish"
+        else:
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(output)
-                os.replace(tmp, mirror_path)
-            except BaseException:
-                if os.path.exists(tmp):
-                    os.unlink(tmp)
-                raise
+                live = json.loads(remote)
+                changed = live != bundle_data
+            except json.JSONDecodeError:
+                changed = True
+                diff_note = "remote data.json unreadable — treating as change"
+            else:
+                diff_note = ("content differs" if changed
+                             else "semantically identical — no content change")
 
-        # SUCCESS — record the published transition in the source manifest.
-        # Opt-in (record_published): only the real CLI/server entry points
-        # set this; tests never write to the content repo.
-        bookkeeping_warning = None
-        if record_published:
-            try:
-                _record_published(tdir, digest)
-            except Exception as e:  # noqa: BLE001
-                bookkeeping_warning = f"published, but source manifest not updated: {e}"
+        # 6. Dry-run or no-op
+        if dry_run or not changed:
+            status = "dryrun" if dry_run and changed else "noop"
+            msg = (f"(dry-run) would write {app_path} in {workdir} and push to "
+                   f"{target['repo']}" if status == "dryrun"
+                   else "nothing to publish — app repo untouched")
+            return DeployResult(status, msg, EXIT_OK, tournament, digest=digest,
+                                changed=changed, warnings=summary["warnings"],
+                                destination=f"{target['repo']}/{app_path}")
 
-        status = "published_with_warning" if bookkeeping_warning else "published"
-        msg = (f"published {digest[:10]} → {target['repo']}/{app_path}"
-               + (f" · WARNING: {bookkeeping_warning}" if bookkeeping_warning else ""))
-        return DeployResult(
-            status, msg, EXIT_OK, tournament, digest=digest, changed=True,
-            warnings=summary["warnings"],
-            destination=f"{target['repo']}/{app_path}")
-    except PlatformError:
-        # Pre-push failure → roll back to starting state, never touch mirror
-        _restore_worktree(workdir, start_head)
-        raise
-    except BaseException:
-        _restore_worktree(workdir, start_head)
-        raise
+        # 7. Publish — transactionally
+        # Save starting HEAD for rollback (worktree was verified clean, so a
+        # hard reset to this commit fully restores file + index + branch).
+        rc, start_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
+        start_head = start_head if rc == 0 else None
+
+        try:
+            os.makedirs(os.path.dirname(git_data), exist_ok=True)
+            with open(git_data, "w", encoding="utf-8") as f:
+                f.write(output)
+
+            # Explicit pathspec — never `git add -A`
+            rc, _, err = run(["git", "add", "--", app_path], cwd=workdir)
+            if rc != 0:
+                raise PlatformError(f"git add failed: {err}", exit_code=EXIT_PUBLISH)
+
+            # Verify the staged diff contains EXACTLY the permitted path
+            rc, staged, _ = run(["git", "diff", "--cached", "--name-only"], cwd=workdir)
+            if rc != 0 or staged != app_path:
+                raise PlatformError(
+                    f"staged diff is not exactly '{app_path}' — got: {staged or '(empty)'}. "
+                    f"Aborting to protect the app shell.", exit_code=EXIT_PUBLISH)
+
+            msg = message or f"data: publish {slug} bundle (digest {digest[:10]})"
+            rc, _, err = run(["git", "commit", "-m", msg, "--", app_path], cwd=workdir)
+            if rc != 0:
+                raise PlatformError(f"git commit failed: {err} (nothing was pushed)",
+                                    exit_code=EXIT_PUBLISH)
+
+            rc, _, err = run(["git", "push", "origin", "main"], cwd=workdir)
+            if rc != 0:
+                raise PlatformError(
+                    f"git push FAILED: {err}\n"
+                    f"The local worktree has been rolled back to its starting state "
+                    f"and the mirror was NOT updated. Fix the push problem "
+                    f"(auth, remote URL, branch protection) and re-run deploy.",
+                    exit_code=EXIT_PUBLISH)
+
+            # Post-push verification: local HEAD must equal origin/main
+            rc, local_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
+            rc2, remote_head, _ = run(["git", "rev-parse", "origin/main"], cwd=workdir)
+            if rc != 0 or rc2 != 0 or local_head != remote_head:
+                raise PlatformError(
+                    "push reported ok but local HEAD ≠ origin/main — check the repo "
+                    "manually before trusting publication.", exit_code=EXIT_PUBLISH)
+
+            # SUCCESS — only now update the mirror, atomically
+            mirror = target.get("mirrorTo")
+            if mirror:
+                mirror_path = os.path.expanduser(mirror)
+                os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(mirror_path),
+                                           prefix=".data.json.tmp.")
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(output)
+                    os.replace(tmp, mirror_path)
+                except BaseException:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+                    raise
+
+            # SUCCESS — record the published transition in the source manifest.
+            # Opt-in (record_published): only the real CLI/server entry points
+            # set this; tests never write to the content repo.
+            bookkeeping_warning = None
+            if record_published:
+                try:
+                    _record_published(tdir, digest)
+                except Exception as e:  # noqa: BLE001
+                    bookkeeping_warning = f"published, but source manifest not updated: {e}"
+
+            status = "published_with_warning" if bookkeeping_warning else "published"
+            msg = (f"published {digest[:10]} → {target['repo']}/{app_path}"
+                   + (f" · WARNING: {bookkeeping_warning}" if bookkeeping_warning else ""))
+            return DeployResult(
+                status, msg, EXIT_OK, tournament, digest=digest, changed=True,
+                warnings=summary["warnings"],
+                destination=f"{target['repo']}/{app_path}")
+        except PlatformError:
+            # Pre-push failure → roll back to starting state, never touch mirror
+            _restore_worktree(workdir, start_head)
+            raise
+        except BaseException:
+            _restore_worktree(workdir, start_head)
+            raise
+
+
+    # Run the whole shared-workdir critical section under the exclusive
+    # per-workDir lock (threads AND processes: ThreadingHTTPServer + CLI).
+    with _deploy_lock(workdir):
+        return _locked_publish()
 
 
 def _record_published(tdir, digest):

@@ -62,7 +62,10 @@ IDENT_RE = r"^[a-z0-9][a-z0-9-]{0,63}$"
 _audit_lock = threading.Lock()
 # Per-module optimistic-concurrency locks: read → compare → replace must be
 # atomic per file, or two simultaneous saves can both pass the digest check
-# and last-write-wins. Keyed by (org, slug, module).
+# and last-write-wins. Keyed by (org, slug, module). Bounded LRU — a long-
+# running server must not accumulate one lock per (tournament, module)
+# forever.
+_MODULE_LOCK_MAX = 512
 _module_locks = {}
 _module_locks_guard = threading.Lock()
 
@@ -70,9 +73,17 @@ _module_locks_guard = threading.Lock()
 def _module_lock(org, slug, module):
     key = (org, slug, module)
     with _module_locks_guard:
-        if key not in _module_locks:
-            _module_locks[key] = threading.Lock()
-        return _module_locks[key]
+        lock = _module_locks.get(key)
+        if lock is None:
+            # Evict the oldest entry when over budget (insertion order =
+            # recency; re-inserting refreshes it below).
+            while len(_module_locks) >= _MODULE_LOCK_MAX:
+                _module_locks.pop(next(iter(_module_locks)))
+            lock = threading.Lock()
+        # Refresh recency: pop + re-insert
+        _module_locks.pop(key, None)
+        _module_locks[key] = lock
+        return lock
 
 
 def _load_or_create_token(env_name, path):
@@ -95,6 +106,44 @@ def _load_or_create_token(env_name, path):
 
 ADMIN_TOKEN = _load_or_create_token("ADMIN_TOKEN", TOKEN_FILE)
 PUBLISH_TOKEN = _load_or_create_token("PUBLISH_TOKEN", PUBLISH_TOKEN_FILE)
+
+# ── Per-user accounts ───────────────────────────────────────────────────
+# users.json (repo root, gitignored): {"Name": {"token": "...", "role": ...}}
+#   role: "editor" (edit/validate/preview/approve/autofill — NOT publish)
+#         "publisher" (everything, including publish)
+#         "admin"     (everything, including publish)
+# The legacy ADMIN_TOKEN / PUBLISH_TOKEN remain as server-level root
+# credentials (env or token files). A user token is matched by constant-
+# time comparison; _actor() then resolves to the real username so audit
+# entries say WHO, not "token:ab12cd34".
+USERS_FILE = os.path.join(REPO_ROOT, "users.json")
+
+
+def load_users():
+    """token → {name, role}. Loaded per request so edits to users.json
+    apply without a server restart (and tests can point REPO_ROOT at a
+    scratch dir)."""
+    try:
+        with open(os.path.join(REPO_ROOT, "users.json"), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    users = {}
+    for name, info in (data or {}).items():
+        token = (info or {}).get("token", "")
+        role = (info or {}).get("role", "editor")
+        if token and role in ("editor", "publisher", "admin"):
+            users[token] = {"name": str(name), "role": role}
+    return users
+
+
+def user_for_token(token):
+    if not token:
+        return None
+    for stored, info in load_users().items():
+        if secrets.compare_digest(token, stored):
+            return info
+    return None
 
 
 def audit(actor, action, tournament, digest=None, detail=None):
@@ -279,19 +328,31 @@ class Handler(BaseHTTPRequestHandler):
         return ""
 
     def _authorized(self):
-        if not ADMIN_TOKEN:
-            return True
+        """Authorized = valid ADMIN_TOKEN root credential OR a registered
+        user token (any role)."""
         token = self._bearer()
-        return bool(token) and secrets.compare_digest(token, ADMIN_TOKEN)
+        if not token:
+            return False
+        if ADMIN_TOKEN and secrets.compare_digest(token, ADMIN_TOKEN):
+            return True
+        return user_for_token(token) is not None
 
     def _publish_authorized(self):
-        """Publish requires PUBLISH_TOKEN in the X-Publish-Token header AND
-        admin auth. If PUBLISH_TOKEN is unset, publish is refused (safer
-        than allowing it by accident)."""
-        if not PUBLISH_TOKEN:
-            return False
-        header = self.headers.get("X-Publish-Token", "")
-        return bool(header) and secrets.compare_digest(header.strip(), PUBLISH_TOKEN)
+        """Publish requires one of:
+          - the X-Publish-Token header matching PUBLISH_TOKEN (root), OR
+          - a bearer user token whose role is publisher or admin.
+        An editor-role user can never publish; if PUBLISH_TOKEN is unset
+        AND no privileged user exists, publish is refused (safer than
+        allowing it by accident)."""
+        token = self._bearer()
+        header = self.headers.get("X-Publish-Token", "").strip()
+        if header and PUBLISH_TOKEN and secrets.compare_digest(header, PUBLISH_TOKEN):
+            return True
+        if token:
+            user = user_for_token(token)
+            if user and user["role"] in ("publisher", "admin"):
+                return True
+        return False
 
     def _guard_api(self):
         if not self._authorized():
@@ -300,7 +361,20 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _actor(self):
-        return "token:" + self._bearer()[:8] if self._bearer() else "anonymous"
+        """Real username when a registered user token is used; otherwise a
+        stable root credential label — never 'anonymous' for authenticated
+        actions, and never the raw token."""
+        token = self._bearer()
+        if not token:
+            return "anonymous"
+        user = user_for_token(token)
+        if user:
+            return user["name"]
+        if ADMIN_TOKEN and secrets.compare_digest(token, ADMIN_TOKEN):
+            return "root-admin"
+        if PUBLISH_TOKEN and secrets.compare_digest(token, PUBLISH_TOKEN):
+            return "root-publish"
+        return "unknown"
 
     def _send_csp(self, status, headers, body):
         headers = dict(headers)

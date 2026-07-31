@@ -6,3 +6,4 @@ out/
 .pytest_cache/
 .admin-token
 .publish-token
+users.json

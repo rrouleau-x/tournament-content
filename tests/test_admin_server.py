@@ -322,3 +322,44 @@ def test_audit_log_written(admin_env):
     with open(log) as f:
         lines = f.read().strip().splitlines()
     assert any("validate" in l for l in lines)
+    assert admin_env["admin_token"][:8] not in "".join(lines)  # never raw token
+    assert any('"actor": "root-admin"' in l for l in lines)
+
+
+def test_user_registry_roles(admin_env):
+    """Per-user tokens: editor can edit but NOT publish; publisher can
+    publish; audit entries record the real username."""
+    users = {
+        "Jane": {"token": "editor-token-jane", "role": "editor"},
+        "Keith": {"token": "publisher-token-keith", "role": "publisher"},
+    }
+    with open(os.path.join(admin_env["content"], "users.json"), "w") as f:
+        json.dump(users, f)
+
+    base = admin_env["base"]
+    tdir = f"{base}/api/tournament/savannah-united/sporting-jax-2026"
+
+    # Editor: authorized for read
+    s, d = req("GET", tdir, token="editor-token-jane")
+    assert s == 200
+    # Editor: NOT authorized to publish (editor role, no publish token)
+    s, d = req("POST", f"{tdir}/publish", token="editor-token-jane")
+    assert s == 403
+    assert "publish" in str(d.get("error", "")).lower()
+    # Publisher: authorized to publish (role carries the privilege)
+    s, d = req("POST", f"{tdir}/publish", token="publisher-token-keith",
+               body={"no_links": True})
+    assert s == 200, d
+    assert d.get("status") in ("published", "noop"), d
+
+    # Audit log carries the real names, not token prefixes
+    with open(os.path.join(admin_env["content"], "out", "audit.log")) as f:
+        content = f.read()
+    assert '"actor": "Keith"' in content
+    assert "editor-token-jane" not in content  # raw token never logged
+
+
+def test_unknown_user_token_rejected(admin_env):
+    s, _ = req("GET", f"{admin_env['base']}/api/tournaments",
+               token="not-a-real-user")
+    assert s == 401

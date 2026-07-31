@@ -251,3 +251,42 @@ def test_result_envelope_shape(app_repo, valid_target):
                       "changed", "blocking", "warnings", "destination"}
     assert d["status"] == "published"
     assert d["exit_code"] == 0
+
+
+def test_concurrent_publish_serializes(app_repo, valid_target):
+    """Two simultaneous publishes to the same target must serialize on the
+    per-workDir lock: both complete, the remote ends with valid content,
+    and no interleaving corrupts the clone. Regression for the deploy
+    race the 8.5-review flagged (no mutex around the git critical section
+    while the admin server is multithreaded)."""
+    import threading
+
+    results = {}
+
+    def worker(tag):
+        try:
+            r = deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target)
+            results[tag] = ("ok", r.status)
+        except Exception as e:  # noqa: BLE001
+            results[tag] = ("err", str(e)[:80])
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    # Both must succeed (first publishes, second no-ops on identical
+    # content) — the lock prevents both passing the clean-check and
+    # interleaving writes.
+    assert set(results) == {"a", "b"}, results
+    for tag, (kind, status) in results.items():
+        assert kind == "ok", f"{tag}: {results[tag]}"
+        assert status in ("published", "noop"), f"{tag}: {results[tag]}"
+    # Exactly one published, one no-op (same content, serialized)
+    statuses = sorted(v[1] for v in results.values())
+    assert statuses == ["noop", "published"], results
+
+    # Remote is valid, unpolluted content — not an interleaved hybrid
+    remote = read_remote(app_repo["workdir"])
+    assert remote["tournament"]["name"] == "Sporting Jax Boys Invitational"
+    # Worktree clean after both runs
+    assert git(app_repo["workdir"], "status", "--porcelain") == ""

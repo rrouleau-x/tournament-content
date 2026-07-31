@@ -711,7 +711,56 @@ async function loadList() {
 }
 
 
-// ── Event wiring (strict CSP: no inline handlers) ────────────────────
+// ── Revision history ───────────────────────────────────────────────────
+async function toggleHistory() {
+  const card = $("e-history-card");
+  if (!card.classList.contains("hidden")) { card.classList.add("hidden"); return; }
+  const name = currentModuleName();
+  const org = state.current.org, slug = state.current.slug;
+  const q = name === "manifest.json" ? "" : "?module=" + encodeURIComponent(name);
+  const d = await api("GET", `/api/tournament/${org}/${slug}/history${q}`);
+  if (d && d.error) { flash(d.error, false); return; }
+  const list = $("e-history-list");
+  list.innerHTML = "";
+  const diffEl = $("e-diff");
+  diffEl.textContent = "";
+  (d.history || []).forEach((c) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.style.cursor = "pointer";
+    row.style.borderBottom = "1px solid var(--border)";
+    row.style.padding = "6px 0";
+    const info = document.createElement("div");
+    info.className = "grow";
+    const msg = document.createElement("div");
+    msg.textContent = c.message || "(no message)";
+    msg.style.fontWeight = "600";
+    const meta = document.createElement("div");
+    meta.className = "muted";
+    meta.textContent = `${c.sha.slice(0, 10)} · ${c.date} · ${c.author}`;
+    info.appendChild(msg); info.appendChild(meta);
+    const view = document.createElement("button");
+    view.className = "btn-ghost btn-sm";
+    view.textContent = "Diff";
+    view.onclick = async () => {
+      const r = await api("GET", `/api/tournament/${org}/${slug}/diff/${encodeURIComponent(name)}?from=${c.sha}`);
+      if (r && r.error) { flash(r.error, false); return; }
+      diffEl.textContent = r.diff || "(no changes in this revision)";
+      diffEl.scrollIntoView({ block: "nearest" });
+    };
+    row.appendChild(info); row.appendChild(view);
+    list.appendChild(row);
+  });
+  if (!(d.history || []).length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No committed revisions for this module yet. (Saves to the working tree appear here once published.)";
+    list.appendChild(empty);
+  }
+  card.classList.remove("hidden");
+}
+
+// ── Event wiring (strict CSP: no inline handlers) ──────────────────────
 function wire(id, fn) {
   const el = document.getElementById(id);
   if (el) el.onclick = fn;
@@ -724,6 +773,8 @@ wire("btn-validate", runValidate);
 wire("btn-preview", runPreview);
 wire("btn-approve", runApprove);
 wire("btn-publish", runPublish);
+wire("btn-history", toggleHistory);
+wire("btn-history-close", () => { $("e-history-card").classList.add("hidden"); });
 wire("btn-autofill", runAutofill);
 wire("btn-create", createTournament);
 wire("btn-logout", clearToken);

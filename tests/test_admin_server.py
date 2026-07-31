@@ -31,7 +31,9 @@ def admin_env(tmp_path, monkeypatch):
     0. The scratch content's _targets.json is rewritten to point at the temp
     app repo so tests can never touch the real app repo."""
     import admin_server
+    import compile as compile_mod
     import deploy as deploy_mod
+    import pipeline
 
     # Scratch content tree (modules + scripts + schemas)
     scratch = tmp_path / "content"
@@ -58,13 +60,13 @@ def admin_env(tmp_path, monkeypatch):
     git(workdir, "branch", "-M", "main")
     git(workdir, "push", "-u", "origin", "main")
 
-    # Point module-level paths at the scratch copy
-    admin_server.REPO_ROOT = str(scratch)
-    deploy_mod.REPO_ROOT = str(scratch)
-    import pipeline
-    pipeline.REPO_ROOT = str(scratch)
-    import compile as compile_mod
-    compile_mod.REPO_ROOT = str(scratch)
+    # Point module-level paths at the scratch copy — via monkeypatch so
+    # the globals are RESTORED after this test (a plain assignment would
+    # leak deploy.REPO_ROOT into later test modules and corrupt them).
+    monkeypatch.setattr(admin_server, "REPO_ROOT", str(scratch))
+    monkeypatch.setattr(deploy_mod, "REPO_ROOT", str(scratch))
+    monkeypatch.setattr(pipeline, "REPO_ROOT", str(scratch))
+    monkeypatch.setattr(compile_mod, "REPO_ROOT", str(scratch))
 
     # Rewrite _targets.json → temp app repo (isolate from real deploys)
     targets_path = os.path.join(scratch, "_targets.json")
@@ -308,7 +310,9 @@ def test_ui_smoke_csp_and_wiring(admin_env):
                    'function renderField', 'btn-toggle-view',
                    # Phase 3.5 review fixes
                    'function validateField', 'function validateAll',
-                   'state.formErrors', 'keyvalue'):
+                   'state.formErrors', 'keyvalue',
+                   # revision history
+                   'function toggleHistory', 'btn-history-close', 'e-history-card'):
         assert marker in js, f"app.js missing {marker}"
     s, css = req("GET", f"{admin_env['base']}/static/app.css")
     assert s == 200
@@ -456,3 +460,89 @@ def test_publish_audit_records_authority(admin_env):
     with open(os.path.join(admin_env["content"], "out", "audit.log")) as f:
         content = f.read()
     assert "authority=root-publish-header" in content
+
+
+def _seed_git(admin_env):
+    """Init a git repo in the scratch content root + one commit so the
+    history/diff endpoints have real data. Returns the commit SHA."""
+    content = admin_env["content"]
+    git(content, "init", "-q")
+    git(content, "config", "user.email", "test@example.com")
+    git(content, "config", "user.name", "Test")
+    git(content, "add", "-A")
+    git(content, "commit", "-q", "-m", "seed")
+    return git(content, "rev-parse", "HEAD")
+
+
+def test_history_endpoint(admin_env):
+    base = admin_env["base"]
+    token = admin_env["admin_token"]
+    _seed_git(admin_env)
+
+    # Whole tournament history
+    s, d = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/history",
+               token=token)
+    assert s == 200, d
+    assert d["count"] >= 1
+    assert d["history"][0]["message"] == "seed"
+    assert len(d["history"][0]["sha"]) == 40  # full SHA for diff round-trip
+
+    # Module-scoped history
+    s, d = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/history?module=venue.json",
+               token=token)
+    assert s == 200, d
+    assert d["module"] == "venue.json"
+    assert d["count"] >= 1
+
+    # History requires auth
+    s, _ = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/history")
+    assert s == 401
+
+
+def test_history_endpoint_bad_module(admin_env):
+    base = admin_env["base"]
+    token = admin_env["admin_token"]
+    _seed_git(admin_env)
+    # Traversal attempt in module name → 400
+    s, _ = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/history?module=..%2F..%2Fsecret.json",
+               token=token)
+    assert s == 400
+
+
+def test_diff_endpoint(admin_env, tmp_path):
+    base = admin_env["base"]
+    token = admin_env["admin_token"]
+    sha = _seed_git(admin_env)
+
+    # Modify venue.json in the working tree (uncommitted change)
+    vpath = os.path.join(admin_env["content"], "orgs", "savannah-united",
+                         "tournaments", "sporting-jax-2026", "venue.json")
+    with open(vpath) as f:
+        v = json.load(f)
+    v["venue"]["parking"] = "NEW PARKING NOTE"
+    with open(vpath, "w") as f:
+        json.dump(v, f, indent=2); f.write("\n")
+
+    # Diff committed SHA → working tree shows the change
+    s, d = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/diff/venue.json?from={sha}",
+               token=token)
+    assert s == 200, d
+    assert d["changed"] is True
+    assert "NEW PARKING NOTE" in d["diff"]
+
+    # Diff with no args → both sides missing → 400
+    s, d = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/diff/venue.json",
+               token=token)
+    assert s == 400
+
+    # Invalid SHA → 400 (no arbitrary git args from client)
+    s, d = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/diff/venue.json?from=abc",
+               token=token)
+    assert s == 400
+    assert "sha" in str(d.get("error", ""))
+
+    # Module that doesn't exist at the commit → clean empty diff, not crash
+    s, d = req("GET", f"{base}/api/tournament/savannah-united/sporting-jax-2026/diff/offline.json?from={sha}",
+               token=token)
+    assert s == 200, d
+    assert d["changed"] is False

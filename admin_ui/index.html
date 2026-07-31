@@ -60,12 +60,21 @@
       <button class="btn-amber" id="btn-preview">Preview Publish</button>
       <button class="btn-green" id="btn-approve">Approve Content</button>
       <button class="btn-red" id="btn-publish">Publish</button>
+      <button class="btn-ghost" id="btn-history" title="Show revision history for this module">History</button>
       <button class="btn-ghost" id="btn-autofill" title="AI-assisted fill for this module">Autofill</button>
     </div>
   </div>
   <div class="card hidden" id="e-report-card" style="margin-top:16px">
     <h2>Guide Health Report</h2>
     <pre class="report" id="e-report"></pre>
+  </div>
+  <div class="card hidden" id="e-history-card" style="margin-top:16px">
+    <div class="row">
+      <h2 class="grow" style="margin:0">Revision History</h2>
+      <button class="btn-ghost" id="btn-history-close">Close</button>
+    </div>
+    <div id="e-history-list"></div>
+    <pre class="report" id="e-diff"></pre>
   </div>
 </div>
 

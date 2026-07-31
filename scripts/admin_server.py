@@ -42,12 +42,14 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import secrets
+import subprocess
 import sys
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
@@ -170,8 +172,101 @@ def api_err(message, status=400, exit_code=None):
 
 
 def valid_identifier(value):
-    import re
     return bool(re.match(IDENT_RE, value or ""))
+
+
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def module_history(org, slug, module=None, limit=50):
+    """Git history for a tournament's module file(s) in the CONTENT repo.
+    Returns [{sha, short, date, author, message}] newest-first, capped.
+    Machine-readable format (no parsing default git output); pathspec is
+    restricted to the validated tournament/module path. module=None →
+    whole tournament dir. Raises ValueError on bad identifiers."""
+    tdir = safe_tournament_dir(org, slug)
+    rel = os.path.relpath(tdir, REPO_ROOT)
+    pathspec = os.path.join(rel, module) if module else rel
+    if module:
+        fpath = safe_module_path(tdir, module)  # validates containment
+    limit = max(1, min(int(limit), 200))
+    # %x1f (unit separator) delimited fields — unambiguous to parse.
+    # Full SHA (H) so the client can pass it straight back to /diff.
+    fmt = "%x1f%H%x1f%cI%x1f%an%x1f%s%x1e"
+    cmd = ["git", "-C", REPO_ROOT, "log", f"-{limit}",
+           f"--format={fmt}", "--follow", "--", pathspec]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise ValueError(f"git log failed: {r.stderr.strip()[:200]}")
+    out = []
+    for rec in r.stdout.split("\x1e"):
+        # NOTE: never .strip() here — \x1f (unit separator) is treated as
+        # whitespace by str.strip() and would eat the leading separator.
+        rec = rec.rstrip("\n")
+        if not rec:
+            continue
+        parts = rec.split("\x1f")
+        # leading \x1f from the format string → drop the empty first part
+        if parts and parts[0] == "":
+            parts = parts[1:]
+        if len(parts) < 4:
+            continue
+        short, date, author, message = parts[:4]
+        out.append({"sha": short, "date": date, "author": author,
+                    "message": message})
+    return out
+
+
+def module_diff(org, slug, module, from_sha=None, to_sha=None):
+    """Unified diff of a module file between two content-repo commits
+    (or a commit and the working tree). git show <sha>:<path> for exact
+    snapshots; difflib for the diff (presentation only). Strict SHA
+    validation — never arbitrary git arguments from the client."""
+    tdir = safe_tournament_dir(org, slug)
+    fpath = safe_module_path(tdir, module)
+    rel = os.path.relpath(fpath, REPO_ROOT)
+    for sha in (from_sha, to_sha):
+        if sha and not _SHA_RE.match(sha):
+            raise ValueError("invalid commit sha (expected 40 hex chars)")
+    if not from_sha and not to_sha:
+        raise ValueError("diff requires at least one of 'from' or 'to'")
+    def snapshot(sha):
+        if not sha:
+            return None
+        r = subprocess.run(["git", "-C", REPO_ROOT, "show",
+                            f"{sha}:{rel}"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return None  # file didn't exist at that commit
+        return r.stdout
+    old = snapshot(from_sha) if from_sha else None
+    if to_sha:
+        new = snapshot(to_sha)
+    else:
+        # No to_sha → diff against the CURRENT working tree (the file as
+        # the admin sees it), not an empty file.
+        if os.path.isfile(fpath):
+            with open(fpath, encoding="utf-8") as f:
+                new = f.read()
+        else:
+            new = None
+    if old is None and new is None:
+        raise ValueError("neither commit has this module file")
+    if old is None:
+        old_lines = []
+    else:
+        old_lines = old.splitlines(keepends=True)
+    if new is None:
+        new_lines = []
+    else:
+        new_lines = new.splitlines(keepends=True)
+    import difflib
+    diff = "".join(difflib.unified_diff(
+        old_lines, new_lines,
+        fromfile=f"{module}@{from_sha or 'working'}" if from_sha else f"{module}@before",
+        tofile=f"{module}@{to_sha or 'working'}" if to_sha else f"{module}@after",
+        n=2))
+    return {"module": module, "from": from_sha, "to": to_sha, "diff": diff,
+            "changed": bool(diff)}
 
 
 def tournament_path(org, slug):
@@ -430,12 +525,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*api_ok({"tournaments": list_tournaments()}))
             if path.startswith("/api/tournament/"):
                 parts = path.split("/")
+                # GET .../<org>/<slug> — full tournament state
                 if len(parts) == 5:
                     org, slug = unquote(parts[3]), unquote(parts[4])
                     data = get_tournament(org, slug)
                     if data is None:
                         return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
                     return self._send(*api_ok(data))
+                # GET .../<org>/<slug>/history[?module=<file>&limit=N]
+                # GET .../<org>/<slug>/diff/<module>?from=<sha>&to=<sha>
+                if len(parts) == 6 and parts[5] == "history":
+                    org, slug = unquote(parts[3]), unquote(parts[4])
+                    q = parse_qs(urlparse(self.path).query)
+                    module = (q.get("module") or [None])[0]
+                    limit = (q.get("limit") or ["50"])[0]
+                    hist = module_history(org, slug, module=module, limit=limit)
+                    return self._send(*api_ok({"history": hist,
+                                               "module": module,
+                                               "count": len(hist)}))
+                if len(parts) == 7 and parts[5] == "diff":
+                    org, slug = unquote(parts[3]), unquote(parts[4])
+                    module = unquote(parts[6])
+                    q = parse_qs(urlparse(self.path).query)
+                    from_sha = (q.get("from") or [None])[0]
+                    to_sha = (q.get("to") or [None])[0]
+                    return self._send(*api_ok(
+                        module_diff(org, slug, module, from_sha, to_sha)))
         except ValueError as e:
             return self._send(*api_err(str(e), 400))
         return self._send(*api_err("not found", 404))

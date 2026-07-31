@@ -57,6 +57,11 @@ def load_json(path):
         return json.load(f)
 
 
+class CompileError(Exception):
+    """Raised for any content problem that should surface as an actionable
+    message rather than a raw traceback (e.g. in CI or a future admin UI)."""
+
+
 def tournament_dir(org, slug):
     return os.path.join(REPO_ROOT, "orgs", org, "tournaments", slug)
 
@@ -69,11 +74,19 @@ def compile_bundle(tdir):
         path = os.path.join(tdir, filename)
         if not os.path.exists(path):
             continue
-        module = load_json(path)
+        try:
+            module = load_json(path)
+        except json.JSONDecodeError as e:
+            raise CompileError(
+                f"{filename} is not valid JSON: {e.msg} (line {e.lineno}, col {e.colno}). "
+                f"Fix the syntax and re-run."
+            ) from e
         for key in keys:
             if key not in module:
-                raise ValueError(
-                    f"{filename} exists but is missing expected key '{key}'"
+                raise CompileError(
+                    f"{filename} exists but is missing expected key '{key}'. "
+                    f"Add the key to the file, or delete the file if this module is "
+                    f"not needed for this tournament."
                 )
             bundle[key] = module[key]
         used.append(filename)
@@ -98,7 +111,11 @@ def main():
         print(f"ERROR: no tournament dir at {tdir}", file=sys.stderr)
         sys.exit(1)
 
-    bundle, used = compile_bundle(tdir)
+    try:
+        bundle, used = compile_bundle(tdir)
+    except CompileError as e:
+        print(f"COMPILE ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if args.with_meta:
         raw = serialize(bundle)

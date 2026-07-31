@@ -1,0 +1,8 @@
+{
+  "savannah-united/sporting-jax-2026": {
+    "repo": "rrouleau-x/sporting-jax-guide",
+    "appPath": "app/data.json",
+    "workDir": "/tmp/sporting-jax-guide",
+    "mirrorTo": "~/.hermes/www/app/data.json"
+  }
+}

@@ -881,3 +881,50 @@ def test_template_has_no_stale_content(admin_env):
         if re.search(r"\b(?:19|20)\d{2}\b", text) and fname != "sport.json":
             findings.append(f"{fname}: year present")
     assert not findings, f"template contains stale content: {findings}"
+
+
+def test_wizard_field_mapping_parity(admin_env):
+    """The wizard's client-side FIELDS_PER_MODULE must mirror the server's
+    _REQUIRED_CONTENT exactly — a ninth required field added server-side
+    must break this test until the wizard learns about it (the reviewer's
+    drift risk: three copies of the checklist mapping)."""
+    import re
+    import admin_server as adm
+
+    # Server authority: _REQUIRED_CONTENT entries
+    server_entries = []
+    for fname, dotted in adm._REQUIRED_CONTENT:
+        server_entries.append((fname, dotted))
+
+    # Client mapping: parse FIELDS_PER_MODULE from the shipped app.js
+    js_path = os.path.join(admin_env["content"], "admin_ui", "app.js")
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    m = re.search(r"const FIELDS_PER_MODULE = (\{.*?\n  \});", js, re.S)
+    assert m, "FIELDS_PER_MODULE not found in app.js"
+    client_block = m.group(1)
+    # Extract module → [fields] pairs from the JS object literal
+    client_entries = []
+    for fname in sorted({f for f, _ in adm._REQUIRED_CONTENT}):
+        fm = re.search(rf'"{fname}": \[(.*?)\]', client_block, re.S)
+        assert fm, f"FIELDS_PER_MODULE missing module {fname}"
+        fields = re.findall(r'"([a-z.]+)"', fm.group(1))
+        client_entries.extend((fname, fld) for fld in fields)
+
+    # The date entries are CONDITIONAL client-side (pushed only when the
+    # admin enters a date) — so the base literal contains the always-on
+    # fields, and the date fields must appear as runtime pushes.
+    server_set = set(server_entries)
+    client_set = set(client_entries)
+    date_fields = {"tournament.dates.start", "tournament.dates.end"}
+    unconditional = {e for e in server_set if e[1] not in date_fields}
+    conditional = {e for e in server_set if e[1] in date_fields}
+    missing = unconditional - client_set
+    assert not missing, f"wizard mapping missing server requirements: {missing}"
+    extra = client_set - server_set
+    assert not extra, f"wizard mapping has fields server doesn't require: {extra}"
+    # Every server date requirement must have a conditional client push
+    for fname, fld in conditional:
+        push_re = re.compile(
+            rf'if \(f\.date(?:Start|End)\) FIELDS_PER_MODULE\["{fname}"\]\.push\("{fld}"\)')
+        assert push_re.search(js), f"missing conditional push for {fld} in app.js"

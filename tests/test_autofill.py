@@ -160,3 +160,62 @@ def test_weather_fill_restores_on_compile_exception(scratch, monkeypatch):
     # Original file restored byte-for-byte
     after = open(os.path.join(scratch, "weather.json")).read()
     assert after == before
+
+
+def test_weather_deadline_threads_timeouts(scratch, monkeypatch):
+    """The total deadline must bound BOTH network calls: the points
+    lookup gets at most the whole deadline, the forecast gets the
+    remaining budget (no 1s floor, no independent 20s default)."""
+    import autofill
+    from autofill import fill_weather
+
+    timeouts = {}
+
+    def fake_fetch_json(url, timeout=20.0):
+        timeouts[url] = timeout
+        if "/points/" in url:
+            return {"properties": {"forecast": "https://api.weather.gov/fake/forecast"}}
+        return {"properties": {"periods": [
+            {"name": "Saturday", "isDaytime": True, "temperature": 91,
+             "temperatureUnit": "F", "windSpeed": "8 mph",
+             "shortForecast": "Sunny"}]}}
+
+    monkeypatch.setattr(autofill, "fetch_json", fake_fetch_json)
+    # Short custom deadline: the points request must NOT get its old
+    # independent 20s default — it's capped to the whole deadline.
+    autofill._nws_points_cache.clear()
+    fill_weather(scratch, 30.0, -81.0, deadline_seconds=5)
+    points_timeout = timeouts.get("https://api.weather.gov/points/30.0,-81.0")
+    forecast_timeout = [t for u, t in timeouts.items() if "/points/" not in u][0]
+    assert points_timeout == 5.0, f"points timeout {points_timeout} not capped to deadline"
+    assert 0 < forecast_timeout <= 5.0, f"forecast timeout {forecast_timeout} out of budget"
+    # No 1s floor: a fresh points lookup must be allowed at most the
+    # deadline, and the forecast at most what remains — neither should
+    # ever be 1.0 purely from the old max(1.0, ...) floor.
+    assert 1.0 not in (points_timeout, forecast_timeout)
+
+
+def test_weather_deadline_short_budget_still_attempts(scratch, monkeypatch):
+    """A sub-second deadline still allows a real (tiny) attempt via the
+    0.05s floor — it must not fail before connecting, and must not get a
+    full one-second timeout."""
+    import autofill
+    from autofill import fill_weather
+
+    timeouts = {}
+
+    def fake_fetch_json(url, timeout=20.0):
+        timeouts[url] = timeout
+        if "/points/" in url:
+            return {"properties": {"forecast": "https://api.weather.gov/fake/forecast"}}
+        return {"properties": {"periods": [
+            {"name": "Saturday", "isDaytime": True, "temperature": 91,
+             "temperatureUnit": "F", "windSpeed": "8 mph",
+             "shortForecast": "Sunny"}]}}
+
+    monkeypatch.setattr(autofill, "fetch_json", fake_fetch_json)
+    autofill._nws_points_cache.clear()
+    fill_weather(scratch, 30.0, -81.0, deadline_seconds=0.2)
+    times = list(timeouts.values())
+    assert all(0 < t <= 0.2 for t in times), f"timeouts exceed 0.2s budget: {times}"
+    assert all(t < 1.0 for t in times), "1s floor leaked back in"

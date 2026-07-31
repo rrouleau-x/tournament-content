@@ -91,7 +91,7 @@ def write_module(tdir, filename, data):
     return path
 
 
-def fetch_json(url, headers=None, timeout=20):
+def fetch_json(url, headers=None, timeout=20.0):
     req = urllib.request.Request(url, headers=headers or NWS_UA)
     with urllib.request.urlopen(req, timeout=float(timeout)) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -231,14 +231,15 @@ _NWS_POINTS_CACHE_MAX = 256
 _NWS_POINTS_TTL = 7 * 24 * 3600  # 7 days
 
 
-def _nws_points_url(lat, lng):
+def _nws_points_url(lat, lng, timeout=20.0):
     key = (round(float(lat), 4), round(float(lng), 4))
     now = _time.time()
     hit = _nws_points_cache.get(key)
     if hit is not None and now - hit[1] < _NWS_POINTS_TTL:
         _nws_points_cache.move_to_end(key)
         return hit[0]
-    points = fetch_json(NWS_POINTS.format(lat=key[0], lng=key[1]))
+    points = fetch_json(NWS_POINTS.format(lat=key[0], lng=key[1]),
+                        timeout=timeout)
     url = points["properties"]["forecast"]
     _nws_points_cache[key] = (url, now)
     _nws_points_cache.move_to_end(key)
@@ -249,28 +250,38 @@ def _nws_points_url(lat, lng):
 
 # ── Weather ─────────────────────────────────────────────────────────────
 
+# Absolute-floor for socket timeouts: a deadline of a few milliseconds
+# still allows a real (tiny) network attempt instead of failing before
+# connecting, without letting a sub-second remainder overshoot by a full
+# second (the old max(1.0, remaining) floor).
+_MIN_TIMEOUT = 0.05
+
+
 def fill_weather(tdir, lat, lng, deadline_seconds=30):
     """Fetch NWS forecast for the venue coordinates → weather.json draft.
 
-    TRUE total operation deadline: the points + forecast requests each
-    carry their own socket timeout, but the forecast request's timeout
-    is capped to the REMAINING budget (min 1s) so a dead NWS can never
-    exceed deadline_seconds for the whole fill."""
+    Total operation deadline: BOTH network requests (points metadata on
+    cache miss + forecast) carry socket timeouts capped to their share
+    of the budget — the points lookup gets at most the whole deadline
+    (it's the first call), and the forecast gets the remaining budget.
+    With the 0.05s floor a sub-second remainder can overshoot by at most
+    ~0.05s, not a full second."""
     if not lat or not lng:
         raise PlatformError("weather fill needs --lat and --lng (venue coordinates)")
     import time
     start = time.monotonic()
     try:
-        # Points metadata is cached per venue; the forecast is the only
-        # request that must always hit the network.
-        forecast_url = _nws_points_url(lat, lng)
+        # Points metadata (cached per venue; only a cache miss hits the
+        # network) — its timeout is the WHOLE deadline: nothing has run
+        # yet, so the budget is untouched.
+        forecast_url = _nws_points_url(lat, lng,
+                                       timeout=max(_MIN_TIMEOUT, deadline_seconds))
         remaining = deadline_seconds - (time.monotonic() - start)
         if remaining <= 0:
             raise PlatformError("weather fill exceeded total deadline")
-        # The forecast request must not run past the deadline — cap its
-        # socket timeout to the remaining budget (floor 1s so a tiny
-        # remainder still allows a real attempt).
-        fc = fetch_json(forecast_url, timeout=max(1.0, remaining))
+        # The forecast request must not run past the deadline — its
+        # socket timeout is the remaining budget (0.05s floor).
+        fc = fetch_json(forecast_url, timeout=max(_MIN_TIMEOUT, remaining))
     except Exception as e:
         raise PlatformError(f"NWS fetch failed: {e}") from e
 

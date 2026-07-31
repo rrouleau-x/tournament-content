@@ -261,8 +261,10 @@ def _set_path(obj, path, value, field):
 
     After a deletion, empty ancestor OBJECTS are pruned bottom-up: if the
     user cleared every coordinate, an empty coordinates {} shell must not
-    survive. (Lists are never pruned — an emptied repeater index slot is
-    left for the UI's row model.)"""
+    survive. Lists are handled differently: a terminal indexed deletion
+    (games[0].opponent = "") uses del, which REMOVES the row and shifts
+    later indices down — the UI's row model supplies full indexed paths,
+    so this matches the browser behavior of deleting a repeater row."""
     parts = path.split(".")
     cur = obj
     # (container, key) chain so a deletion can prune empty ancestors

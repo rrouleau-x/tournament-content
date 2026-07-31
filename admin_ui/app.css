@@ -32,8 +32,10 @@
            cursor: pointer; font-weight: 600; font-size: 13px; }
   .btn-blue { background: var(--blue); color: #fff; }
   .btn-blue:hover { background: var(--blue-dark); }
-  .btn-ghost { background: #fff; border: 1px solid var(--border); color: var(--text); }
-  .btn-green { background: var(--green); color: #fff; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text);
+               padding: 7px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .btn-danger { color: var(--red, #d64545) !important; border-color: var(--red, #d64545) !important; }
+  .btn-sm { padding: 4px 9px !important; font-size: 12px !important; margin-left: 6px; }
   .btn-amber { background: var(--amber); color: #fff; }
   .btn-red { background: var(--red); color: #fff; }
   button:disabled { opacity: .5; cursor: not-allowed; }

@@ -1,0 +1,8 @@
+{
+  "sport": "soccer",
+  "sportConfig": {
+    "teamLabel": "sva",
+    "fieldLabel": "psst",
+    "matchLabel": "123"
+  }
+}

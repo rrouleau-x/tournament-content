@@ -945,6 +945,23 @@ async function loadList() {
     btn.textContent = "Edit";
     btn.onclick = () => showEdit(t.org, t.slug);
     actCell.appendChild(btn);
+    if (t.status !== "live") {
+      // Deletion is irreversible and destroys the draft — require a
+      // confirm AND the publish token (same capability as publish).
+      const del = document.createElement("button");
+      del.className = "btn-ghost btn-sm btn-danger";
+      del.textContent = "Delete";
+      del.onclick = async () => {
+        if (!confirm("Delete tournament " + t.org + "/" + t.slug +
+                     "? This is IRREVERSIBLE — the draft is destroyed.")) return;
+        const pt = prompt("Enter the PUBLISH token (deletion is irreversible):") || "";
+        const d = await api("DELETE", `/api/tournament/${t.org}/${t.slug}`, {}, pt);
+        if (d.error) { flash(d.error, false); return; }
+        flash("Deleted " + d.deleted);
+        loadList();
+      };
+      actCell.appendChild(del);
+    }
     tr.append(nameCell, stCell, rvCell, dgCell, actCell);
     tb.appendChild(tr);
   });

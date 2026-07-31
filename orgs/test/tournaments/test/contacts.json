@@ -1,0 +1,12 @@
+{
+  "contacts": {
+    "manager": {
+      "name": "chuck",
+      "phone": "Dizzle"
+    },
+    "coach": {
+      "name": "bob",
+      "phone": "carl"
+    }
+  }
+}

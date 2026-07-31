@@ -799,6 +799,54 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*self._new_tournament(body))
         return self._send(*api_err("not found", 404))
 
+    def do_DELETE(self):
+        if _rate_limited(self):
+            return self._send(429, {"Content-Type": "text/plain",
+                                    "Retry-After": str(REQ_WINDOW)},
+                              b"rate limit exceeded - try again shortly")
+        if not self._guard_api():
+            return
+        path = urlparse(self.path).path
+        parts = path.split("/")
+        # DELETE /api/tournament/<org>/<slug> — destroy a tournament.
+        # Destructive and irreversible, so it requires the publish
+        # credential (X-Publish-Token) — the same capability that can
+        # reach parents. A draft/in_review tournament is safe to delete
+        # (never published); a LIVE tournament is REFUSED (parents are
+        # still being served from the app repo).
+        if len(parts) == 5 and parts[1] == "api" and parts[2] == "tournament":
+            org, slug = unquote(parts[3]), unquote(parts[4])
+            ok, authority = self._publish_authorized()
+            if not ok:
+                return self._send(*api_err(
+                    "deleting a tournament requires the publish token "
+                    "(X-Publish-Token header) — deletion is irreversible",
+                    403))
+            try:
+                from pipeline import PlatformError, load_manifest
+                tdir = safe_tournament_dir(org, slug)
+                if not os.path.isdir(tdir):
+                    return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
+                m = load_manifest(tdir)
+                status = m.get("status", "")
+                if status == "live":
+                    return self._send(*api_err(
+                        f"cannot delete '{org}/{slug}' — it is LIVE and parents "
+                        f"are still being served from the app repo. Set status "
+                        f"to 'draft' first if you truly want to remove it.", 400))
+                import shutil
+                shutil.rmtree(tdir)
+                _record_tournament_delete(org, slug)
+                audit(self._actor(), "tournament.delete", f"{org}/{slug}",
+                      detail=f"authority={authority}; status={status}")
+                return self._send(*api_ok({
+                    "deleted": f"{org}/{slug}", "status": "deleted"}))
+            except ValueError as e:
+                return self._send(*api_err(str(e), 400))
+            except PlatformError as e:
+                return self._send(*api_err(str(e), 400))
+        return self._send(*api_err("not found", 404))
+
     def _autofill(self, org, slug, module, body):
         """Fill a module from body: {url} or {data}. Always draft — never
         publishes. Rules URL fetching is SSRF-guarded (see autofill.safe_fetch)."""
@@ -1007,6 +1055,38 @@ def _scaffold_checklist(tdir):
             missing.append({"module": fname, "field": dotted,
                             "status": "empty"})
     return missing
+
+
+def _record_tournament_delete(org, slug):
+    """Commit a tournament deletion to the CONTENT repo (git-as-database:
+    deletions are part of the audit trail too). Serialized by the same
+    cross-process content-repo lock as publish bookkeeping. Best-effort —
+    a bookkeeping failure must not flip the deletion into an error (the
+    directory is already gone; the source repo just misses the tombstone).
+    Only commits if the tournament was actually TRACKED in git (an
+    untracked draft leaves nothing to commit)."""
+    rel = os.path.join("orgs", org, "tournaments", slug)
+    r = subprocess.run(["git", "-C", REPO_ROOT, "ls-files", "--", rel],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        return  # never tracked (e.g. freshly scaffolded draft) — nothing to commit
+    try:
+        from deploy import _content_repo_lock
+        with _content_repo_lock():
+            rc, _, err = subprocess.run(
+                ["git", "-C", REPO_ROOT, "add", "-A", "--", rel],
+                capture_output=True, text=True)
+            if rc != 0:
+                raise RuntimeError(f"git add failed: {err}")
+            rc, _, err = subprocess.run(
+                ["git", "-C", REPO_ROOT, "commit", "-m",
+                 f"tournament: delete {org}/{slug} (draft)",
+                 "--", rel], capture_output=True, text=True)
+            if rc != 0 and "nothing to commit" not in err:
+                raise RuntimeError(f"git commit failed: {err}")
+    except Exception as e:  # noqa: BLE001 — bookkeeping is best-effort
+        print(f"[admin] warning: could not record tournament deletion: {e}",
+              file=sys.stderr)
 
 
 def main():

@@ -13,9 +13,10 @@
   "compiledFrom": "data.json",
   "createdAt": "2026-07-31T12:55:15Z",
   "revision": {
-    "workflow": "approved",
+    "workflow": "published",
     "digest": "29c417514b147bb7",
     "reviewer": "admin",
-    "approvedAt": "2026-07-31T00:00:00Z"
+    "approvedAt": "2026-07-31T00:00:00Z",
+    "publishedAt": "2026-07-31T16:02:32Z"
   }
 }

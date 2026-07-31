@@ -301,7 +301,11 @@ def test_ui_smoke_csp_and_wiring(admin_env):
     s, js = req("GET", f"{admin_env['base']}/static/app.js")
     assert s == 200
     for marker in ('wire("btn-save"', 'wire("btn-publish"', 'DOMContentLoaded',
-                   'showList', 'confirmDiscardChanges'):
+                   'showList', 'confirmDiscardChanges',
+                   # Phase 3 form engine wiring
+                   'function renderModuleEditor', 'function getPath',
+                   'function setPath', 'function delPath', 'function renderForm',
+                   'function renderField', 'btn-toggle-view'):
         assert marker in js, f"app.js missing {marker}"
     s, css = req("GET", f"{admin_env['base']}/static/app.css")
     assert s == 200
@@ -363,3 +367,25 @@ def test_unknown_user_token_rejected(admin_env):
     s, _ = req("GET", f"{admin_env['base']}/api/tournaments",
                token="not-a-real-user")
     assert s == 401
+
+
+def test_forms_endpoint_static_no_auth(admin_env):
+    """Form models are static UI metadata: served without auth."""
+    s, d = req("GET", f"{admin_env['base']}/api/forms/venue.json")
+    assert s == 200
+    assert d["module"] == "venue.json"
+    assert d["title"] == "Venue"
+    assert any(f["path"] == "venue.name" for f in d["fields"])
+
+    s, d = req("GET", f"{admin_env['base']}/api/forms/schedule.json")
+    assert s == 200
+    games = next(f for f in d["fields"] if f["path"] == "games")
+    assert games["widget"] == "repeater"
+
+    s, _ = req("GET", f"{admin_env['base']}/api/forms/unknown.json")
+    assert s == 404
+
+    s, d = req("GET", f"{admin_env['base']}/api/forms")
+    assert s == 200
+    assert isinstance(d["forms"], list)
+    assert len(d["forms"]) >= 3

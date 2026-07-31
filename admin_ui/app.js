@@ -1,6 +1,7 @@
 
 const $ = (id) => document.getElementById(id);
-let state = { tournaments: [], current: null, modules: [], dirty: false };
+let state = { tournaments: [], current: null, modules: [], dirty: false,
+              formModel: null, showForm: false, rawContent: "{}", parsed: null };
 
 function flash(msg, ok = true) {
   const f = $("flash");
@@ -147,20 +148,265 @@ async function selectModule(name) {
   // manifest.json is edited via the manifest object.
   let content = (r.moduleFiles && r.moduleFiles[name]) || "";
   if (name === "manifest.json" && !content) content = JSON.stringify(r.manifest, null, 2);
-  $("e-editor").value = content || "{}";
-  $("e-editor").oninput = () => { state.dirty = true; $("e-saved").classList.add("hidden"); };
+  state.current.moduleFiles = r.moduleFiles || {};
+  state.current.moduleDigests = r.moduleDigests || {};
+  // Form model for this module (static schema-derived UI metadata)
+  let model = null;
+  if (name !== "manifest.json") {
+    try {
+      const fm = await api("GET", `/api/forms/${name}`);
+      if (fm && fm.fields) model = fm;
+    } catch (e) { model = null; }
+  }
+  state.formModel = model;
+  state.showForm = !!model;   // forms on by default when available
+  state.rawContent = content || "{}";
+  try { state.parsed = JSON.parse(state.rawContent); } catch (e) { state.parsed = null; }
+  renderModuleEditor();
   [...$("e-tabs").children].forEach(b => b.classList.toggle("active", b.textContent === name.replace(".json", "")));
+}
+
+function renderModuleEditor() {
+  const editor = $("e-editor");
+  const toggleWrap = document.createElement("div");
+  if (state.formModel) {
+    // Form view (default) with a toggle to the raw JSON editor
+    editor.classList.add("hidden");
+    toggleWrap.className = "row";
+    toggleWrap.style.marginBottom = "8px";
+    const toggle = document.createElement("button");
+    toggle.className = "btn-ghost";
+    toggle.textContent = state.showForm ? "Raw JSON" : "Form view";
+    toggle.id = "btn-toggle-view";
+    toggle.onclick = () => {
+      if (state.showForm) {
+        // form → raw: push current form object into the raw editor
+        try { state.rawContent = JSON.stringify(state.parsed || {}, null, 2); }
+        catch (e) { flash("Form state invalid: " + e.message, false); return; }
+      } else {
+        // raw → form: re-parse the raw editor into the form object
+        try { state.parsed = JSON.parse(state.rawContent); }
+        catch (e) { flash("Invalid JSON in raw editor: " + e.message, false); return; }
+      }
+      state.showForm = !state.showForm;
+      renderModuleEditor();
+    };
+    toggleWrap.appendChild(toggle);
+    $("e-tabs").after ? null : null;
+    // remove previous toggle + form, then rebuild
+    const oldToggle = document.getElementById("toggle-wrap");
+    if (oldToggle) oldToggle.remove();
+    const oldForm = document.getElementById("form-panel");
+    if (oldForm) oldForm.remove();
+    toggleWrap.id = "toggle-wrap";
+    editor.parentNode.insertBefore(toggleWrap, editor);
+    if (state.showForm) {
+      const form = renderForm(state.formModel, state.parsed);
+      form.id = "form-panel";
+      editor.parentNode.insertBefore(form, editor.nextSibling);
+    } else {
+      editor.classList.remove("hidden");
+      editor.value = state.rawContent;
+      editor.oninput = () => { state.dirty = true; $("e-saved").classList.add("hidden"); };
+    }
+  } else {
+    editor.classList.remove("hidden");
+    editor.value = state.rawContent;
+    editor.oninput = () => { state.dirty = true; $("e-saved").classList.add("hidden"); };
+  }
+}
+
+// ── Form engine ─────────────────────────────────────────────────────────
+function getPath(obj, path) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    const m = p.match(/^(.+)\[(\d+)\]$/);
+    if (m) cur = cur[m[1]] && cur[m[1]][+m[2]];
+    else cur = cur[p];
+  }
+  return cur;
+}
+
+function setPath(obj, path, value) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const last = i === parts.length - 1;
+    const m = p.match(/^(.+)\[(\d+)\]$/);
+    if (m) {
+      const key = m[1], idx = +m[2];
+      if (!cur[key]) cur[key] = [];
+      while (cur[key].length <= idx) cur[key].push({});
+      if (last) cur[key][idx] = value;
+      else cur = cur[key][idx];
+    } else {
+      if (last) cur[p] = value;
+      else { if (cur[p] == null) cur[p] = {}; cur = cur[p]; }
+    }
+  }
+  return obj;
+}
+
+function delPath(obj, path) {
+  const parts = path.split(".");
+  const last = parts.pop();
+  const parent = getPath(obj, parts.join("."));
+  if (parent && typeof parent === "object") {
+    const m = last.match(/^(.+)\[(\d+)\]$/);
+    if (m) parent[m[1]].splice(+m[2], 1);
+    else delete parent[last];
+  }
+}
+
+function renderForm(model, data) {
+  const form = document.createElement("div");
+  form.className = "form-panel";
+  if (model.help) {
+    const h = document.createElement("p");
+    h.className = "muted";
+    h.textContent = model.help;
+    form.appendChild(h);
+  }
+  for (const f of model.fields) form.appendChild(renderField(f, data));
+  return form;
+}
+
+function fieldInput(f, value) {
+  const input = document.createElement(f.widget === "textarea" ? "textarea"
+                : f.widget === "select" ? "select" : "input");
+  if (f.widget === "textarea") input.rows = 3;
+  if (input.tagName === "INPUT") {
+    const typeMap = { text: "text", url: "url", email: "email", date: "date",
+                      number: "number", checkbox: "checkbox" };
+    input.type = typeMap[f.widget] || "text";
+    if (f.widget === "number" && f.minimum != null) input.min = f.minimum;
+    if (f.widget === "number" && f.maximum != null) input.max = f.maximum;
+  }
+  if (f.widget === "select") {
+    for (const opt of f.options || []) {
+      const o = document.createElement("option");
+      o.value = opt; o.textContent = opt;
+      input.appendChild(o);
+    }
+  }
+  if (f.widget === "checkbox") input.checked = !!value;
+  else input.value = value == null ? "" : value;
+  return input;
+}
+
+function renderField(f, data, rowIndex) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const value = getPath(data, f.path);
+  const has = value !== undefined;
+
+  if (f.widget === "section") {
+    const fs = document.createElement("fieldset");
+    const lg = document.createElement("legend");
+    lg.textContent = f.label;
+    fs.appendChild(lg);
+    if (f.help) { const h = document.createElement("p"); h.className = "muted"; h.textContent = f.help; fs.appendChild(h); }
+    for (const c of f.children || []) fs.appendChild(renderField(c, data));
+    wrap.appendChild(fs);
+    return wrap;
+  }
+
+  if (f.widget === "repeater") {
+    const label = document.createElement("label");
+    label.textContent = f.label + (f.required ? " *" : "");
+    wrap.appendChild(label);
+    if (f.help) { const h = document.createElement("p"); h.className = "muted"; h.textContent = f.help; wrap.appendChild(h); }
+    const list = document.createElement("div");
+    list.className = "rep-list";
+    const rows = Array.isArray(value) ? value : [];
+    rows.forEach((_, i) => {
+      const row = document.createElement("div");
+      row.className = "rep-row";
+      for (const c of f.children || []) {
+        const cf = Object.assign({}, c, { path: f.path + "[" + i + "]." + c.name });
+        row.appendChild(renderField(cf, data));
+      }
+      const rm = document.createElement("button");
+      rm.className = "btn-ghost btn-sm";
+      rm.textContent = "Remove";
+      rm.onclick = () => { delPath(data, f.path + "[" + i + "]"); state.dirty = true; renderModuleEditor(); };
+      row.appendChild(rm);
+      list.appendChild(row);
+    });
+    const add = document.createElement("button");
+    add.className = "btn-ghost btn-sm";
+    add.textContent = "+ Add " + f.label.toLowerCase();
+    add.onclick = () => {
+      if (!Array.isArray(getPath(data, f.path))) setPath(data, f.path, []);
+      setPath(data, f.path + "[" + rows.length + "]", {});
+      state.dirty = true;
+      renderModuleEditor();
+    };
+    wrap.appendChild(list);
+    wrap.appendChild(add);
+    return wrap;
+  }
+
+  if (f.widget === "coords") {
+    const label = document.createElement("label");
+    label.textContent = f.label + (f.required ? " *" : "");
+    wrap.appendChild(label);
+    const row = document.createElement("div");
+    row.className = "row";
+    for (const c of f.children || []) {
+      const sub = document.createElement("div");
+      sub.className = "grow";
+      const sl = document.createElement("label");
+      sl.className = "muted"; sl.textContent = c.label;
+      const inp = fieldInput(c, getPath(data, c.path));
+      inp.oninput = () => { setPath(data, c.path, inp.type === "number" ? parseFloat(inp.value) : inp.value); state.dirty = true; $("e-saved").classList.add("hidden"); };
+      sub.appendChild(sl); sub.appendChild(inp);
+      row.appendChild(sub);
+    }
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  const label = document.createElement("label");
+  label.textContent = f.label + (f.required ? " *" : "");
+  wrap.appendChild(label);
+  if (f.help) { const h = document.createElement("p"); h.className = "muted"; h.textContent = f.help; wrap.appendChild(h); }
+  const input = fieldInput(f, has ? value : "");
+  input.oninput = () => {
+    let v = input.value;
+    if (input.type === "checkbox") v = input.checked;
+    else if (input.type === "number") v = input.value === "" ? null : parseFloat(input.value);
+    else if (v === "" && !f.required) v = null;
+    setPath(data, f.path, v);
+    state.dirty = true;
+    $("e-saved").classList.add("hidden");
+  };
+  wrap.appendChild(input);
+  return wrap;
 }
 
 async function saveModule() {
   const name = currentModuleName();
-  let content = $("e-editor").value;
-  try { JSON.parse(content); } catch (e) {
-    flash("Invalid JSON: " + e.message, false); return;
+  let content;
+  if (state.formModel && state.showForm) {
+    // Form view: serialize the edited object back to module JSON — the
+    // SAME shape the raw editor produces, so the backend is untouched.
+    try {
+      content = JSON.stringify(state.parsed || {}, null, 2);
+    } catch (e) { flash("Form state invalid: " + e.message, false); return; }
+  } else {
+    content = $("e-editor").value;
+    try { JSON.parse(content); } catch (e) {
+      flash("Invalid JSON: " + e.message, false); return;
+    }
   }
   const baseDigest = (state.current.moduleDigests || {})[name] || null;
   const d = await api("PUT", `/api/tournament/${state.current.org}/${state.current.slug}/module/${name}`,
             { content, baseDigest });
+  if (d && d.error) { flash(d.error, false); return; }
   state.dirty = false;
   state.current.moduleDigests = state.current.moduleDigests || {};
   state.current.moduleDigests[name] = d.digest;

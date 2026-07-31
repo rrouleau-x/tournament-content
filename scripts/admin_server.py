@@ -405,6 +405,26 @@ class Handler(BaseHTTPRequestHandler):
                      else "application/javascript; charset=utf-8")
             with open(fpath, "rb") as f:
                 return self._send_csp(200, {"Content-Type": ctype}, f.read())
+        # Form models are static UI metadata (schema-derived, no content):
+        # served without auth, like the UI files themselves.
+        if path == "/api/forms" or path.startswith("/api/forms/"):
+            try:
+                from forms import build_form_model
+                if path == "/api/forms":
+                    from pipeline import MODULE_REGISTRY
+                    models = []
+                    for module, _, _ in MODULE_REGISTRY:
+                        m = build_form_model(module)
+                        if m:
+                            models.append(m)
+                    return self._send(*api_ok({"forms": models}))
+                module = unquote(path[len("/api/forms/"):])
+                m = build_form_model(module)
+                if m is None:
+                    return self._send(*api_err(f"no form model for {module}", 404))
+                return self._send(*api_ok(m))
+            except ValueError as e:
+                return self._send(*api_err(str(e), 400))
         if not path.startswith("/api/"):
             return self._send(*api_err("not found", 404))
         if not self._guard_api():

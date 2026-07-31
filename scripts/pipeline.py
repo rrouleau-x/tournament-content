@@ -124,33 +124,60 @@ def load_revision(tdir):
     return rev if isinstance(rev, dict) else {}
 
 
-def write_revision(tdir, workflow, digest, reviewer=None, manifest=None):
+def write_revision(tdir, workflow, digest, reviewer=None, manifest=None,
+                   expected_manifest_digest=None):
     """Write the manifest revision object. Returns the updated manifest.
-    workflow must be one of REVISION_WORKFLOWS."""
+    workflow must be one of REVISION_WORKFLOWS.
+
+    expected_manifest_digest: compare-and-swap guard. If provided, the
+    current manifest's sha256 must match before the write proceeds —
+    protects approve/publish bookkeeping from clobbering a manifest that
+    another actor changed concurrently. Raises PlatformError on mismatch."""
     if workflow not in REVISION_WORKFLOWS:
         raise PlatformError(f"invalid revision workflow '{workflow}' — expected "
                             f"one of {', '.join(REVISION_WORKFLOWS)}")
+    import hashlib
+    import fcntl
     from datetime import datetime, timezone
+    manifest_path = os.path.join(tdir, "manifest.json")
     manifest = manifest if manifest is not None else load_manifest(tdir)
-    rev = dict(manifest.get("revision") or {})
-    rev["workflow"] = workflow
-    rev["digest"] = digest
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    if workflow == REVISION_APPROVED:
-        # Approving a (possibly new) digest: this content is not yet
-        # published, so a stale publishedAt from a previous revision must
-        # not survive — it would mislabel the current state.
-        rev["publishedAt"] = None
-        rev["reviewer"] = reviewer or "admin"
-        rev["approvedAt"] = now
-    elif workflow == REVISION_PUBLISHED:
-        # Publication follows approval: keep approvedAt (when it was
-        # reviewed) and stamp when it actually reached parents.
-        rev["publishedAt"] = now
-    manifest["revision"] = rev
-    with open(os.path.join(tdir, "manifest.json"), "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    if expected_manifest_digest is not None:
+        with open(manifest_path, encoding="utf-8") as f:
+            current_raw = f.read()
+        if hashlib.sha256(current_raw.encode("utf-8")).hexdigest()[:16] \
+                != expected_manifest_digest:
+            raise PlatformError(
+                "manifest changed since it was loaded — another actor edited "
+                "it concurrently. Reload and retry the approval/publication.")
+    # Mutually exclude concurrent revision writers (approve + publish +
+    # record_published can otherwise race on the whole-file RMW).
+    with open(manifest_path, "a", encoding="utf-8") as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
+        try:
+            # Re-read under the lock: the file may have changed since the
+            # CAS check above.
+            manifest = load_manifest(tdir)
+            rev = dict(manifest.get("revision") or {})
+            rev["workflow"] = workflow
+            rev["digest"] = digest
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if workflow == REVISION_APPROVED:
+                # Approving a (possibly new) digest: this content is not yet
+                # published, so a stale publishedAt from a previous revision
+                # must not survive — it would mislabel the current state.
+                rev["publishedAt"] = None
+                rev["reviewer"] = reviewer or "admin"
+                rev["approvedAt"] = now
+            elif workflow == REVISION_PUBLISHED:
+                # Publication follows approval: keep approvedAt (when it was
+                # reviewed) and stamp when it actually reached parents.
+                rev["publishedAt"] = now
+            manifest["revision"] = rev
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+        finally:
+            fcntl.flock(lock_f, fcntl.LOCK_UN)
     return manifest
 
 

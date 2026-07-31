@@ -57,7 +57,7 @@ orgs/<org>/tournaments/<slug>/     one folder per tournament
 _targets.json                       org/slug → app repo publish target mapping
 _schemas/bundle-v1.json             the compiled data.json contract (v1)
 scripts/                            pipeline (compile, validate, deploy, split, guide)
-tests/                              pytest suite (37 tests, throwaway git repos)
+tests/                              pytest suite (62 tests: compile/validate/autofill/deploy/admin-server HTTP)
 out/                                compiled bundles + link cache (gitignored)
 ```
 
@@ -154,17 +154,45 @@ failures (exit 1) prevent publish:
   once no live tournament uses it. Today the validator always loads v1 —
   the version registry is not yet implemented.
 
+## Admin server & revision workflow (implemented — not roadmap)
+
+The admin server (`scripts/admin_server.py`, localhost:8899 by default) is
+**implemented and operational**: tournament list, module editor (raw JSON),
+validate/preview/approve/publish, autofill, and new-tournament scaffolding.
+The revision workflow (`manifest.revision`: draft → in_review → approved →
+published, digest-tied) is **live**: publish requires status `live` AND the
+current content digest matching the approved revision.
+
+Security model (internet-tunnel-ready):
+- Two-role tokens: `ADMIN_TOKEN` (editor: everything except publish) and
+  `PUBLISH_TOKEN` (required for publish). Both auto-generated to
+  `.admin-token` / `.publish-token` (0600, gitignored) or via env vars.
+- `allow_draft` is CLI-only; the HTTP API can never publish unapproved
+  content, and publish always passes `allow_draft=False`.
+- Strict identifiers (`^[a-z0-9][a-z0-9-]{0,63}$`), realpath containment on
+  every filesystem route, fixed static-file allowlist (index.html/app.css/
+  app.js), restrictive CSP, 1MB request cap, SSRF-guarded autofill URL
+  fetching (public-IP + per-redirect revalidation).
+- Optimistic concurrency: module saves require `baseDigest` (stale → 409)
+  under a per-module lock; manifest revision transitions use a file lock +
+  compare-and-swap (`expected_manifest_digest`).
+- Append-only audit log at `out/audit.log` (actor/action/tournament/
+  digest/timestamp, including failures).
+
 ## Roadmap (from the Phase 1 design doc)
 
-- **Phase 2:** admin UI (wizard + module forms + dashboard consuming
-  `validate.py --json`), AI-assisted content generation (hotel research,
-  schedule import, rules extraction). AI drafts land `status: draft` +
-  human review before `live`.
-- **Revision model:** `status` is lifecycle state today; a revision/approval
-  model (draft → in_review → approved → published, tied to content digest)
-  is the Phase 2 upgrade path — the status gate stays as the Phase 1 rail.
+- **Form-based admin UI** (wizard + module forms + dashboard consuming
+  `validate.py --json`): raw JSON editing works for technical operators but
+  is not the final experience for non-technical club admins. This is the
+  next milestone.
+- **AI-assisted content generation:** autofill (weather via NWS, schedule,
+  rules extraction, hotels) is implemented and lands as draft content
+  requiring human approval. Deeper integration (research-driven autofill
+  orchestration) remains.
 - **Team-specific content:** per-team compiled bundles (`data-<team>.json`),
   selected via `?team=`.
-- **Concurrency:** branches + PR review for multiple admins/AI agents.
+- **Concurrency:** per-file locks + optimistic concurrency are in place for
+  single-machine multi-admin; branches + PR review for distributed
+  multi-admin/AI agents remains future work.
 - **CI:** `validate every tournament on push` workflow is ready (see
   `tournament-companion-pwa` skill) — needs a workflow-scoped PAT to commit.

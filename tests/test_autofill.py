@@ -84,3 +84,78 @@ def test_rules_fill_from_html(scratch):
 def test_rules_fill_bad_source(tmp_path):
     with pytest.raises(Exception, match="not found"):
         fill_rules(tmp_path, "/nonexistent/rules.html")
+
+
+def test_weather_fill_mocked_nws(scratch, monkeypatch):
+    """NWS weather fill with a mocked API response: provenance fields are
+    written, summary contains two distinct daytime periods, and the module
+    stays schema-valid."""
+    from autofill import fill_weather
+
+    calls = {}
+
+    def fake_fetch_json(url):
+        calls["url"] = url
+        if "/points/" in url:
+            return {"properties": {"forecast": "https://api.weather.gov/fake/forecast"}}
+        return {"properties": {"periods": [
+            {"name": "Saturday", "isDaytime": True, "temperature": 91,
+             "temperatureUnit": "F", "windSpeed": "8 mph",
+             "shortForecast": "Sunny", "detailedForecast": "Hot."},
+            {"name": "Sunday", "isDaytime": True, "temperature": 89,
+             "temperatureUnit": "F", "windSpeed": "10 mph",
+             "shortForecast": "Scattered Thunderstorms",
+             "detailedForecast": "Afternoon storms."},
+            {"name": "Saturday Night", "isDaytime": False, "temperature": 74,
+             "temperatureUnit": "F", "windSpeed": "5 mph",
+             "shortForecast": "Clear"},
+        ]}}
+
+    import autofill
+    monkeypatch.setattr(autofill, "fetch_json", fake_fetch_json)
+
+    path, msg = fill_weather(scratch, 30.0821, -81.5484)
+    with open(path) as f:
+        w = json.load(f)["weather"]
+    # Two daytime periods in the summary, night period excluded
+    assert "Saturday" in w["summary"] and "Sunday" in w["summary"]
+    assert "Saturday Night" not in w["summary"]
+    assert "91" in w["summary"] and "89" in w["summary"]
+    # Provenance
+    assert w["source"] == "National Weather Service (api.weather.gov)"
+    assert w["sourceApiUrl"] == "https://api.weather.gov/fake/forecast"
+    assert w["forecastLink"] == "https://api.weather.gov/fake/forecast"
+    assert "updatedAt" in w
+    assert_valid_module(scratch)
+
+
+def test_weather_fill_restores_on_compile_exception(scratch, monkeypatch):
+    """If compilation raises after the candidate is installed, the original
+    module must be restored (regression: exception path left candidate in
+    place)."""
+    from autofill import fill_weather
+    import compile as compile_mod
+
+    before = open(os.path.join(scratch, "weather.json")).read()
+
+    def fake_fetch_json(url):
+        if "/points/" in url:
+            return {"properties": {"forecast": "https://api.weather.gov/fake/forecast"}}
+        return {"properties": {"periods": [
+            {"name": "Saturday", "isDaytime": True, "temperature": 91,
+             "temperatureUnit": "F", "windSpeed": "8 mph",
+             "shortForecast": "Sunny"}]}}
+
+    def boom(tdir):
+        raise RuntimeError("simulated compile failure")
+
+    import autofill
+    monkeypatch.setattr(autofill, "fetch_json", fake_fetch_json)
+    monkeypatch.setattr(compile_mod, "compile_bundle", boom)
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        fill_weather(scratch, 30.0821, -81.5484)
+
+    # Original file restored byte-for-byte
+    after = open(os.path.join(scratch, "weather.json")).read()
+    assert after == before

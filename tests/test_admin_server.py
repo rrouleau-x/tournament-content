@@ -250,6 +250,69 @@ def test_stale_put_conflict(admin_env):
     assert s == 409, d
 
 
+def test_put_without_digest_rejected_428(admin_env):
+    """baseDigest is MANDATORY for existing modules — omitting it is a
+    lost-update risk and must be refused with 428."""
+    url = f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026/module/team.json"
+    s, d = req("GET", f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026",
+               token=admin_env["admin_token"])
+    content = d["moduleFiles"]["team.json"]
+    s, d = req("PUT", url, token=admin_env["admin_token"], body={"content": content})
+    assert s == 428, d
+    assert "baseDigest" in d.get("error", "")
+
+
+def test_concurrent_puts_single_winner(admin_env):
+    """Two truly-simultaneous saves with the same baseDigest: exactly one
+    must win (200), the other must get 409 — no silent last-write-wins."""
+    url = f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026/module/team.json"
+    s, data = req("GET", f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026",
+                  token=admin_env["admin_token"])
+    assert s == 200
+    current = data["moduleDigests"]["team.json"]
+    base = data["moduleFiles"]["team.json"]
+
+    results = {}
+    def worker(tag):
+        content = json.dumps(json.loads(base))  # same bytes, same digest
+        s, d = req("PUT", url, token=admin_env["admin_token"],
+                   body={"content": content, "baseDigest": current})
+        results[tag] = s
+
+    import threading
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    codes = sorted(results.values())
+    assert codes == [200, 409], f"expected one 200 + one 409, got {results}"
+
+
+def test_ui_smoke_csp_and_wiring(admin_env):
+    """The CSP-compatible UI: index.html has NO inline script/onclick,
+    app.js/app.css are served with CSP headers, and app.js contains the
+    wiring that makes the dashboard functional."""
+    s, html = req("GET", f"{admin_env['base']}/")
+    assert s == 200
+    assert "onclick=" not in html
+    assert "<script>" not in html
+    assert 'src="/static/app.js"' in html
+
+    s, js = req("GET", f"{admin_env['base']}/static/app.js")
+    assert s == 200
+    for marker in ('wire("btn-save"', 'wire("btn-publish"', 'DOMContentLoaded',
+                   'showList', 'confirmDiscardChanges'):
+        assert marker in js, f"app.js missing {marker}"
+    s, css = req("GET", f"{admin_env['base']}/static/app.css")
+    assert s == 200
+
+    # CSP header present on HTML + JS
+    r = urllib.request.Request(f"{admin_env['base']}/static/app.js")
+    with urllib.request.urlopen(r, timeout=10) as resp:
+        csp = resp.headers.get("Content-Security-Policy", "")
+        assert "script-src 'self'" in csp
+
+
 def test_audit_log_written(admin_env):
     url = f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026/validate"
     s, _ = req("POST", url, token=admin_env["admin_token"], body={"no_links": True})

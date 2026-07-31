@@ -130,10 +130,14 @@ def remote_bundle(workdir, app_path):
 
 def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
                       refresh_links=False, allow_draft=False, message=None,
-                      targets=None, workdir_override=None, tdir=None):
+                      targets=None, workdir_override=None, tdir=None,
+                      record_published=False):
     """Full deploy pipeline. Returns a DeployResult; never raises for
     expected outcomes. Raises PlatformError only for config problems.
-    tdir may be overridden (tests use scratch tournament copies)."""
+    tdir may be overridden (tests use scratch tournament copies).
+    record_published: only the real CLI/server entry points enable this —
+    it commits the source manifest to the content repo, and tests must
+    never trigger content-repo writes against the live repo."""
     org, slug = parse_tournament_id(tournament)
     tdir = tdir or tournament_dir(org, slug)
     if not os.path.isdir(tdir):
@@ -264,19 +268,21 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
                     os.unlink(tmp)
                 raise
 
-        # SUCCESS — record the published transition in the source manifest
-        # (only when the tournament lives inside the content repo; tests
-        # using scratch dirs skip this). Best-effort: publication itself
-        # already succeeded — a manifest-record failure must not flip the
-        # result to failure.
-        try:
-            _record_published(tdir, digest)
-        except Exception as e:  # noqa: BLE001
-            print(f"      warning: could not record published revision: {e}")
+        # SUCCESS — record the published transition in the source manifest.
+        # Opt-in (record_published): only the real CLI/server entry points
+        # set this; tests never write to the content repo.
+        bookkeeping_warning = None
+        if record_published:
+            try:
+                _record_published(tdir, digest)
+            except Exception as e:  # noqa: BLE001
+                bookkeeping_warning = f"published, but source manifest not updated: {e}"
 
+        status = "published_with_warning" if bookkeeping_warning else "published"
+        msg = (f"published {digest[:10]} → {target['repo']}/{app_path}"
+               + (f" · WARNING: {bookkeeping_warning}" if bookkeeping_warning else ""))
         return DeployResult(
-            "published", f"published {digest[:10]} → {target['repo']}/{app_path}",
-            EXIT_OK, tournament, digest=digest, changed=True,
+            status, msg, EXIT_OK, tournament, digest=digest, changed=True,
             warnings=summary["warnings"],
             destination=f"{target['repo']}/{app_path}")
     except PlatformError:
@@ -344,6 +350,7 @@ def main():
             refresh_links=args.refresh_links,
             allow_draft=args.allow_draft,
             message=args.message,
+            record_published=not args.dry_run,
         )
     except PlatformError as e:
         result = DeployResult("error", str(e), e.exit_code, args.tournament)

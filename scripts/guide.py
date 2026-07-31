@@ -159,7 +159,8 @@ def cmd_publish(args):
         return 1
     result = deploy_tournament(args.tournament, run_link_checks=not args.no_links,
                                refresh_links=args.refresh_links,
-                               allow_draft=args.allow_draft)
+                               allow_draft=args.allow_draft,
+                               record_published=True)  # real publish: update source manifest
     print(report.render())
     print()
     print(safe_to_publish(args.tournament, report, deploy_info=result))

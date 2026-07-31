@@ -100,10 +100,21 @@ def write_module(tdir, filename, data):
 
 def _restore_original(path, original):
     """Put the pre-autofill module content back (or remove the file if the
-    module didn't exist before)."""
+    module didn't exist before) — atomically via a sibling temp file +
+    os.replace, so a failure during restoration can never truncate the
+    original."""
+    import tempfile
+    d = os.path.dirname(path)
     if original is not None:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(original)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-restore-", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(original)
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
     elif os.path.exists(path):
         os.unlink(path)
 

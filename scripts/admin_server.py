@@ -60,6 +60,19 @@ MAX_BODY = 1_000_000  # 1 MB
 
 IDENT_RE = r"^[a-z0-9][a-z0-9-]{0,63}$"
 _audit_lock = threading.Lock()
+# Per-module optimistic-concurrency locks: read → compare → replace must be
+# atomic per file, or two simultaneous saves can both pass the digest check
+# and last-write-wins. Keyed by (org, slug, module).
+_module_locks = {}
+_module_locks_guard = threading.Lock()
+
+
+def _module_lock(org, slug, module):
+    key = (org, slug, module)
+    with _module_locks_guard:
+        if key not in _module_locks:
+            _module_locks[key] = threading.Lock()
+        return _module_locks[key]
 
 
 def _load_or_create_token(env_name, path):
@@ -355,16 +368,28 @@ class Handler(BaseHTTPRequestHandler):
                 if content is None:
                     return self._send(*api_err("missing 'content' in body"))
                 json.loads(content)  # must parse before we touch the file
-                # Optimistic concurrency: require the digest the client read
-                expected = body.get("baseDigest")
-                if expected is not None:
-                    with open(fpath, encoding="utf-8") as f:
-                        live = f.read()
-                    if module_digest(live) != expected:
-                        return self._send(*api_err(
-                            "conflict — module changed since you loaded it (stale "
-                            "edit). Reload and re-apply.", 409))
-                atomic_write(fpath, content)
+
+                # Optimistic concurrency under a per-module lock: the
+                # read → compare → replace sequence must be atomic or two
+                # simultaneous saves can both pass the digest check.
+                with _module_lock(org, slug, module):
+                    exists = os.path.isfile(fpath)
+                    if exists:
+                        # baseDigest is MANDATORY for existing modules —
+                        # a save without it is a lost-update risk.
+                        expected = body.get("baseDigest")
+                        if not expected:
+                            return self._send(*api_err(
+                                "baseDigest is required when saving an existing "
+                                "module (read the module first, then save with "
+                                "the digest it returned)", 428))
+                        with open(fpath, encoding="utf-8") as f:
+                            live = f.read()
+                        if module_digest(live) != expected:
+                            return self._send(*api_err(
+                                "conflict — module changed since you loaded it "
+                                "(stale edit). Reload and re-apply.", 409))
+                    atomic_write(fpath, content)
                 audit(self._actor(), "module.save", f"{org}/{slug}",
                       digest=module_digest(content), detail=module)
                 return self._send(*api_ok({"saved": module, "org": org, "slug": slug,
@@ -506,7 +531,8 @@ class Handler(BaseHTTPRequestHandler):
                     result = deploy_tournament(
                         tournament,
                         run_link_checks=not body.get("no_links", False),
-                        allow_draft=False)
+                        allow_draft=False,
+                        record_published=True)  # real publish: update source manifest
                     audit(self._actor(), "publish", tournament,
                           digest=result.digest, detail=result.status)
                     return api_ok(result.to_dict())

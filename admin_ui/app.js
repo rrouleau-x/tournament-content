@@ -38,6 +38,8 @@ function ensureToken() {
 }
 
 function clearToken() {
+  if (!confirmDiscardChanges()) return;
+  state.dirty = false;  // already confirmed; don't re-prompt in showList
   sessionStorage.removeItem("admin_token");
   sessionStorage.removeItem("publish_token");
   flash("Logged out — tokens cleared");
@@ -50,18 +52,26 @@ function promptPublishToken() {
   return t;
 }
 
+function confirmDiscardChanges() {
+  if (state.dirty && !confirm("Unsaved changes — discard?")) return false;
+  return true;
+}
+
 function showList() {
+  if (!confirmDiscardChanges()) return;
   $("view-list").classList.remove("hidden");
   $("view-new").classList.add("hidden");
   $("view-edit").classList.add("hidden");
   loadList();
 }
 function showNew() {
+  if (!confirmDiscardChanges()) return;
   $("view-list").classList.add("hidden");
   $("view-new").classList.remove("hidden");
   $("view-edit").classList.add("hidden");
 }
 async function showEdit(org, slug) {
+  if (!confirmDiscardChanges()) return;
   $("view-list").classList.add("hidden");
   $("view-new").classList.add("hidden");
   $("view-edit").classList.remove("hidden");
@@ -128,7 +138,7 @@ function renderTabs() {
 }
 
 async function selectModule(name) {
-  if (state.dirty && !confirm("Unsaved changes — discard?")) return;
+  if (!confirmDiscardChanges()) return;
   state.dirty = false;
   $("e-saved").classList.add("hidden");
   $("e-module-desc").textContent = `Module: ${name}`;
@@ -225,7 +235,7 @@ async function runPublish() {
                "Approved digest: " + ((state.current.manifest.revision || {}).digest || "—").slice(0,10) + "\n" +
                "Current digest:  " + (state.current.digest || "—").slice(0,10))) return;
   const d = await api("POST", `/api/tournament/${state.current.org}/${state.current.slug}/publish`,
-                      { no_links: true }, pt);
+                      {}, pt);
   if (d.status === "error") { flash(d.message, false); renderReport({ error: d.message }); return; }
   flash(d.message, d.exit_code === 0);
   renderReport({ status: d.status, message: d.message });

@@ -153,6 +153,8 @@ function flash(msg, ok = true) {
 
 async function api(method, url, body) {
   const opts = { method, headers: {} };
+  const token = localStorage.getItem("admin_token");
+  if (token) opts.headers["Authorization"] = "Bearer " + token;
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -160,8 +162,18 @@ async function api(method, url, body) {
   const r = await fetch(url, opts);
   let data = {};
   try { data = await r.json(); } catch (e) {}
+  if (r.status === 401) { promptToken(); throw new Error("unauthorized — enter the admin token"); }
   if (!r.ok && !data.error) throw new Error("HTTP " + r.status);
   return data;
+}
+
+function promptToken() {
+  const t = prompt("Enter admin token (from the server's .admin-token file):");
+  if (t) { localStorage.setItem("admin_token", t.trim()); location.reload(); }
+}
+
+function ensureToken() {
+  if (!localStorage.getItem("admin_token")) promptToken();
 }
 
 function showList() {

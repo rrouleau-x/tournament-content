@@ -4,3 +4,4 @@ out/
 *.pyc
 .DS_Store
 .pytest_cache/
+.admin-token

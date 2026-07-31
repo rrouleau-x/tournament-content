@@ -6,8 +6,13 @@ publish) as JSON endpoints. Binds to 127.0.0.1 by default — this is admin
 tooling, NOT parent-facing. The PWA is never touched; this server only reads
 and writes the content repo through the existing pipeline functions.
 
+AUTH: if ADMIN_TOKEN is set (env or ~/.hermes/www/content/.admin-token),
+every /api/* request must include `Authorization: Bearer <token>`. The UI
+prompts for the token once and stores it in localStorage. Set a token before
+exposing the server through any tunnel — the API can publish content.
+
 Usage:
-    python3 scripts/admin_server.py [--port 8899] [--host 127.0.0.1]
+    ADMIN_TOKEN=secret python3 scripts/admin_server.py [--port 8899] [--host 127.0.0.1]
 
 Endpoints:
     GET  /                              admin UI (static files)
@@ -24,6 +29,7 @@ Endpoints:
 import argparse
 import json
 import os
+import secrets
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
@@ -32,6 +38,31 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
 
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "admin_ui")
+TOKEN_FILE = os.path.join(REPO_ROOT, ".admin-token")
+
+
+def load_token():
+    """Token from env ADMIN_TOKEN, else from .admin-token file. If neither
+    exists, generate one and write it to the file (so the operator can find
+    it). Returns the token or None if auth is disabled."""
+    token = os.environ.get("ADMIN_TOKEN", "")
+    if token:
+        return token
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, encoding="utf-8") as f:
+            return f.read().strip() or None
+    token = secrets.token_urlsafe(24)
+    try:
+        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+            f.write(token + "\n")
+        os.chmod(TOKEN_FILE, 0o600)
+        print(f"[admin] generated token → {TOKEN_FILE}", file=sys.stderr)
+    except OSError:
+        pass
+    return token
+
+
+ADMIN_TOKEN = load_token()
 
 
 def api_ok(data, status=200):
@@ -122,6 +153,20 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
+    def _authorized(self):
+        """Require Bearer token on /api/* routes (unless auth disabled)."""
+        if not ADMIN_TOKEN:
+            return True
+        header = self.headers.get("Authorization", "")
+        expected = f"Bearer {ADMIN_TOKEN}"
+        return secrets.compare_digest(header, expected)
+
+    def _guard_api(self):
+        if not self._authorized():
+            self._send(*api_err("unauthorized — missing or invalid token", 401))
+            return False
+        return True
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/" or path == "/index.html":
@@ -138,6 +183,10 @@ class Handler(BaseHTTPRequestHandler):
                 with open(fpath, "rb") as f:
                     return self._send(200, {"Content-Type": ctype}, f.read())
             return self._send(404, {"Content-Type": "text/plain"}, b"not found")
+        if not path.startswith("/api/"):
+            return self._send(*api_err("not found", 404))
+        if not self._guard_api():
+            return
         if path == "/api/tournaments":
             return self._send(*api_ok({"tournaments": list_tournaments()}))
         if path.startswith("/api/tournament/"):
@@ -153,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path = urlparse(self.path).path
+        if not self._guard_api():
+            return
         parts = path.split("/")
         # PUT /api/tournament/<org>/<slug>/module/<name>
         if len(parts) == 7 and parts[5] == "module":
@@ -179,6 +230,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self._guard_api():
+            return
         parts = path.split("/")
         if len(parts) == 6 and parts[5] in ("validate", "preview", "approve", "publish"):
             org, slug, action = unquote(parts[3]), unquote(parts[4]), parts[5]

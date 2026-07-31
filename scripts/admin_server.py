@@ -426,15 +426,19 @@ class Handler(BaseHTTPRequestHandler):
         return user_for_token(token) is not None
 
     def _publish_authorized(self):
-        """Publish requires one of:
+        """Publish requires a publish-capable credential, ONE of:
           - the X-Publish-Token header matching PUBLISH_TOKEN (root), OR
           - a bearer user token whose role is publisher or admin.
-        An editor-role user can never publish; if PUBLISH_TOKEN is unset
-        AND no privileged user exists, publish is refused (safer than
-        allowing it by accident).
-        Returns (authorized, authority) — authority is recorded in the
-        audit log so the authorization path is visible, not just the
-        initiating actor."""
+        POLICY (capability composition): a registered editor-role user
+        cannot publish by role ALONE, but MAY publish if they separately
+        possess the root publish credential (X-Publish-Token). That is
+        the documented two-token model — the publish credential is the
+        capability, not the bearer role. The audit log records the
+        authority path (user-role:… vs root-publish-header) so every
+        publish is attributable to both WHO (actor) and WHAT granted it.
+        If PUBLISH_TOKEN is unset AND no privileged user exists, publish
+        is refused (safer than allowing it by accident).
+        Returns (authorized, authority)."""
         token = self._bearer()
         header = self.headers.get("X-Publish-Token", "").strip()
         if header and PUBLISH_TOKEN and secrets.compare_digest(header, PUBLISH_TOKEN):
@@ -571,53 +575,34 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 action = body.get("action")
                 if action == "validate-proposed":
-                    # Validate candidate module content WITHOUT saving —
-                    # club admins get field-level feedback before a save.
+                    # Validate candidate module content WITHOUT saving and
+                    # WITHOUT touching the live tournament directory: the
+                    # candidate is compiled via an in-memory overlay, so no
+                    # swap, no restore, no crash window, and no concurrent
+                    # request can ever observe the candidate as real content.
                     from compile import compile_bundle
                     from validate import Report, run_checks
-                    from forms import build_form_model
                     content = body.get("content")
                     if content is None:
                         return self._send(*api_err("missing 'content' in body"))
-                    json.loads(content)
-                    # Write candidate to a temp location and compile
-                    # the tournament with it — the module path is the
-                    # source of truth for compilation.
-                    import tempfile as _tf
-                    with _tf.NamedTemporaryFile("w", dir=tdir, suffix=".json",
-                                                delete=False, encoding="utf-8") as tmpf:
-                        tmpf.write(content)
-                        tmp_name = tmpf.name
+                    json.loads(content)  # must parse before anything else
                     try:
-                        # swap in candidate, compile+validate, restore
-                        backup = None
-                        if os.path.exists(fpath):
-                            with open(fpath, encoding="utf-8") as f:
-                                backup = f.read()
-                        os.replace(tmp_name, fpath)
-                        try:
-                            bundle, _, _ = compile_bundle(tdir)
-                            report = Report()
-                            run_checks(bundle, report, run_link_checks=False,
-                                       tdir=tdir)
-                            blocking = report.blocking()
-                            warnings = report.summary()["warnings"]
-                        finally:
-                            if backup is not None:
-                                with open(fpath, "w", encoding="utf-8") as f:
-                                    f.write(backup)
-                            else:
-                                os.unlink(fpath)
-                        return self._send(*api_ok({
-                            "status": "valid" if not blocking else "invalid",
-                            "blocking": len(blocking),
-                            "warnings": warnings,
-                            "messages": [{"level": m[0], "detail": m[2]}
-                                         for m in blocking[:20]],
-                        }))
-                    finally:
-                        if os.path.exists(tmp_name):
-                            os.unlink(tmp_name)
+                        bundle, _, _ = compile_bundle(tdir, overrides={module: content})
+                        report = Report()
+                        run_checks(bundle, report, run_link_checks=False,
+                                   tdir=tdir)
+                        blocking = report.blocking()
+                        warnings = report.summary()["warnings"]
+                    except Exception as e:  # noqa: BLE001 — CompileError etc.
+                        return self._send(*api_err(
+                            f"proposed content invalid: {e}", 400))
+                    return self._send(*api_ok({
+                        "status": "valid" if not blocking else "invalid",
+                        "blocking": len(blocking),
+                        "warnings": warnings,
+                        "messages": [{"level": m[0], "detail": m[2]}
+                                     for m in blocking[:20]],
+                    }))
                 content = body.get("content")
                 if content is None:
                     return self._send(*api_err("missing 'content' in body"))
@@ -811,23 +796,32 @@ class Handler(BaseHTTPRequestHandler):
             return api_err(str(e))
         if os.path.exists(tdir):
             return api_err(f"tournament {org}/{slug} already exists")
-        src = os.path.join(REPO_ROOT, "orgs", org, "tournaments", "sporting-jax-2026")
-        if not os.path.isdir(src):
-            return api_err("template tournament missing (sporting-jax-2026)")
+        # Scaffold from a VERSIONED TEMPLATE — never from a live tournament
+        # (copying sporting-jax-2026 carried tournament-specific content
+        # into every new event: stale dates, venues, hotels, contacts).
+        template = os.path.join(REPO_ROOT, "_templates", "tournament-v1")
+        if not os.path.isdir(template):
+            return api_err("template missing: _templates/tournament-v1")
         import shutil
-        shutil.copytree(src, tdir)
+        os.makedirs(os.path.dirname(tdir), exist_ok=True)
+        shutil.copytree(template, tdir)
         mpath = os.path.join(tdir, "manifest.json")
         with open(mpath, encoding="utf-8") as f:
             m = json.load(f)
         m["slug"] = slug
+        m["org"] = org
         m["status"] = "draft"
-        m["name"] = body.get("name") or f"{slug.replace('-', ' ').title()} (edit me)"
+        m["name"] = body.get("name") or f"{slug.replace('-', ' ').title()}"
         m.pop("revision", None)  # new tournaments start unapproved
         with open(mpath, "w", encoding="utf-8") as f:
             json.dump(m, f, indent=2, ensure_ascii=False)
             f.write("\n")
         audit(self._actor(), "tournament.new", f"{org}/{slug}")
-        return api_ok({"tournament": f"{org}/{slug}", "status": "draft"}, status=201)
+        return api_ok({
+            "tournament": f"{org}/{slug}",
+            "status": "draft",
+            "checklist": _scaffold_checklist(tdir),
+        }, status=201)
 
 
 def approve_tournament(tdir, reviewer="admin"):
@@ -835,6 +829,38 @@ def approve_tournament(tdir, reviewer="admin"):
     entry points use identical validation + recording."""
     from pipeline import approve_tournament as _impl
     return _impl(tdir, reviewer=reviewer)
+
+
+# Required content modules for a publishable tournament — checked at
+# scaffold time so a new tournament starts with a visible TODO list.
+_REQUIRED_CONTENT = [
+    ("tournament.json", "tournament", "name"),
+    ("tournament.json", "tournament", "dates"),
+    ("tournament.json", "tournament", "hostClub"),
+    ("venue.json", "venue", "name"),
+    ("venue.json", "venue", "address"),
+    ("contacts.json", "contacts", "manager"),
+    ("schedule.json", "scheduleStatus", None),  # must not be empty/pending forever
+]
+
+
+def _scaffold_checklist(tdir):
+    """Which required fields are still empty after scaffolding — returned
+    with the new-tournament response so the admin knows what to fill."""
+    missing = []
+    for fname, key, sub in _REQUIRED_CONTENT:
+        try:
+            with open(os.path.join(tdir, fname), encoding="utf-8") as f:
+                mod = json.load(f)
+        except (OSError, ValueError):
+            missing.append({"module": fname, "field": f"{key}.{sub}" if sub else key,
+                            "status": "missing"})
+            continue
+        val = mod.get(key) if sub is None else (mod.get(key) or {}).get(sub)
+        if val in (None, "", [], {}):
+            missing.append({"module": fname, "field": f"{key}.{sub}" if sub else key,
+                            "status": "empty"})
+    return missing
 
 
 def main():

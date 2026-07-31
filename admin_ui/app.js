@@ -294,8 +294,15 @@ function validateField(f, value) {
   }
   if (f.widget === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
     return "Enter a valid email";
-  if (f.widget === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(value))
-    return "Use YYYY-MM-DD";
+  if (f.widget === "date") {
+    // Shape check + REAL calendar validation: 2026-99-99 matches the
+    // regex but is not a date — parse components and round-trip.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Use YYYY-MM-DD";
+    const [y, m, d] = value.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d)
+      return "Not a real date";
+  }
   return null;
 }
 
@@ -322,6 +329,16 @@ function validateAll(model, data) {
             if (msg) errors[cf.path] = msg;
           }
         });
+        continue;
+      }
+      if (f.widget === "keyvalue") {
+        // Blank keys (from an unfinished "+ Add" row) must block save —
+        // a "" key in the JSON would be confusing garbage.
+        const obj = getPath(data, f.path);
+        if (obj && typeof obj === "object") {
+          const keys = Object.keys(obj);
+          if (keys.includes("")) errors[f.path] = "Remove the empty key row";
+        }
         continue;
       }
       const msg = validateField(f, getPath(data, f.path));
@@ -425,6 +442,8 @@ function renderField(f, data, rowIndex) {
   if (f.widget === "keyvalue") {
     // Dynamic-key string map (e.g. venue.fields.layoutNotes): rows of
     // key + value. Keys are object properties, so rows edit in place.
+    // Duplicate/blank keys are rejected inline (a mistyped duplicate
+    // field number must never silently overwrite another note).
     const label = document.createElement("label");
     label.textContent = f.label + (f.required ? " *" : "");
     wrap.appendChild(label);
@@ -441,11 +460,25 @@ function renderField(f, data, rowIndex) {
       kIn.value = k;
       kIn.style.width = "40%";
       kIn.placeholder = "Field #";
+      const errEl = document.createElement("span");
+      errEl.className = "field-err hidden";
+      errEl.style.width = "100%";
       kIn.oninput = () => {
-        if (kIn.value === k) return;
+        const newKey = kIn.value.trim();
+        if (newKey === k) { errEl.classList.add("hidden"); kIn.classList.remove("invalid"); return; }
+        // Reject blank keys and duplicates against OTHER keys
+        if (!newKey) {
+          errEl.textContent = "Key can't be blank";
+          errEl.classList.remove("hidden"); kIn.classList.add("invalid"); return;
+        }
+        if (Object.prototype.hasOwnProperty.call(obj, newKey)) {
+          errEl.textContent = "Duplicate key — pick a different one";
+          errEl.classList.remove("hidden"); kIn.classList.add("invalid"); return;
+        }
+        errEl.classList.add("hidden"); kIn.classList.remove("invalid");
         const v = obj[k];
         delete obj[k];
-        if (kIn.value) obj[kIn.value] = v;
+        obj[newKey] = v;
         state.dirty = true;
         renderModuleEditor();
       };
@@ -459,7 +492,7 @@ function renderField(f, data, rowIndex) {
       rm.className = "btn-ghost btn-sm";
       rm.textContent = "Remove";
       rm.onclick = () => { delete obj[k]; state.dirty = true; renderModuleEditor(); };
-      row.appendChild(kIn); row.appendChild(vIn); row.appendChild(rm);
+      row.appendChild(kIn); row.appendChild(vIn); row.appendChild(rm); row.appendChild(errEl);
       list.appendChild(row);
     });
     const add = document.createElement("button");
@@ -677,6 +710,12 @@ async function createTournament() {
   const d = await api("POST", "/api/tournaments/new", { org, slug, name: $("n-name").value.trim() });
   if (d.error) { flash(d.error, false); return; }
   flash("Created " + d.tournament + " (draft)");
+  if (d.checklist && d.checklist.length) {
+    // Surface the incompleteness checklist so a non-technical admin knows
+    // exactly what to fill before this tournament can be published.
+    const items = d.checklist.map(c => "• " + c.module + " → " + c.field).join("\n");
+    alert("New tournament created — fill these before publishing:\n\n" + items);
+  }
   showList();
 }
 

@@ -176,6 +176,27 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def _check_peer_public(resp):
+    """Defense-in-depth against DNS-rebinding TOCTOU: _is_public_host()
+    validates the name, but urllib re-resolves when connecting — a hostile
+    DNS server could return a public IP for the check and a private IP for
+    the connect. After the socket is open, verify the ACTUAL connected
+    peer is public before reading any data."""
+    try:
+        sock = resp.fp.raw._sock  # noqa: SLF001 — stdlib internals, best available
+        peer = sock.getpeername()[0]
+    except Exception:  # noqa: BLE001 — can't verify, don't fail open on that alone
+        return
+    try:
+        ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved \
+            or ip.is_multicast or ip.is_unspecified:
+        sock.close()
+        raise PlatformError(f"connection reached non-public address {peer} — blocked")
+
+
 def safe_fetch_text(url, max_bytes=1_000_000):
     """Fetch a URL server-side with SSRF guards: HTTPS/HTTP only, public
     destination only (loopback/private/link-local/reserved blocked before
@@ -194,6 +215,8 @@ def safe_fetch_text(url, max_bytes=1_000_000):
     req = urllib.request.Request(url, headers={"User-Agent": "tournament-content-autofill/1.0"})
     try:
         with opener.open(req, timeout=20) as resp:
+            # Rebind defense: verify the connected peer, not just the name
+            _check_peer_public(resp)
             chunks = []
             total = 0
             while True:
@@ -216,15 +239,45 @@ def fetch_text(url):
         return resp.read().decode("utf-8", errors="replace")
 
 
+# NWS point metadata (lat/lng → forecast URL) changes infrequently —
+# cache it so repeated fills of the same venue skip the first request.
+# Bounded: clear when it exceeds 256 entries.
+_nws_points_cache = {}
+_NWS_POINTS_CACHE_MAX = 256
+
+
+def _nws_points_url(lat, lng):
+    key = (round(float(lat), 4), round(float(lng), 4))
+    if key in _nws_points_cache:
+        return _nws_points_cache[key]
+    points = fetch_json(NWS_POINTS.format(lat=key[0], lng=key[1]))
+    url = points["properties"]["forecast"]
+    if len(_nws_points_cache) >= _NWS_POINTS_CACHE_MAX:
+        _nws_points_cache.clear()
+    _nws_points_cache[key] = url
+    return url
+
+
 # ── Weather ─────────────────────────────────────────────────────────────
 
-def fill_weather(tdir, lat, lng):
-    """Fetch NWS forecast for the venue coordinates → weather.json draft."""
+def fill_weather(tdir, lat, lng, deadline_seconds=30):
+    """Fetch NWS forecast for the venue coordinates → weather.json draft.
+
+    Total operation deadline (not just per-request timeouts): the points
+    + forecast requests each carry a 20s socket timeout, so a dead NWS
+    could otherwise tie up a server thread for ~40s. deadline_seconds caps
+    the whole fill."""
     if not lat or not lng:
         raise PlatformError("weather fill needs --lat and --lng (venue coordinates)")
+    import time
+    start = time.monotonic()
     try:
-        points = fetch_json(NWS_POINTS.format(lat=lat, lng=lng))
-        forecast_url = points["properties"]["forecast"]
+        # Points metadata is cached per venue; the forecast is the only
+        # request that must always hit the network.
+        forecast_url = _nws_points_url(lat, lng)
+        remaining = deadline_seconds - (time.monotonic() - start)
+        if remaining <= 0:
+            raise PlatformError("weather fill exceeded total deadline")
         fc = fetch_json(forecast_url)
     except Exception as e:
         raise PlatformError(f"NWS fetch failed: {e}") from e

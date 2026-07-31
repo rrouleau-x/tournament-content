@@ -546,3 +546,109 @@ def test_diff_endpoint(admin_env, tmp_path):
                token=token)
     assert s == 200, d
     assert d["changed"] is False
+
+
+def test_validate_proposed_never_touches_live_file(admin_env):
+    """The candidate must never appear as real content — even while
+    validation runs. Reads the module file DURING a validate-proposed
+    call and asserts it stays byte-identical (regression for the
+    swap-based implementation, which exposed the candidate to concurrent
+    readers and could leave it installed on process death)."""
+    tdir = os.path.join(admin_env["content"], "orgs", "savannah-united",
+                        "tournaments", "sporting-jax-2026")
+    vpath = os.path.join(tdir, "venue.json")
+    original = open(vpath).read()
+    url = f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026/module/venue.json"
+    token = admin_env["admin_token"]
+
+    candidate = json.dumps({"venue": {"name": "CANDIDATE", "address": "X"}})
+    observed = []
+
+    def hammer():
+        # Repeatedly read the live file while validation runs
+        for _ in range(200):
+            with open(vpath) as f:
+                observed.append(f.read())
+
+    import threading
+    t = threading.Thread(target=hammer)
+    t.start()
+    s, d = req("PUT", url, token=token,
+               body={"action": "validate-proposed", "content": candidate})
+    t.join()
+
+    assert s == 200, d
+    # The live file NEVER contained the candidate (no swap ever happened)
+    assert all(o == original for o in observed), "live file exposed candidate!"
+    assert open(vpath).read() == original  # still pristine
+
+
+def test_publish_authorization_combinations(admin_env):
+    """Every bearer × publish-header combination, explicit policy:
+    editor role alone → 403; editor + root publish header → allowed
+    (capability composition, audited root-publish-header); unknown user +
+    root publish header → allowed (header is the capability); no bearer +
+    root publish header → allowed; wrong header → 403."""
+    users = {
+        "Jane": {"token": "editor-token-jane", "role": "editor"},
+        "Keith": {"token": "publisher-token-keith", "role": "publisher"},
+    }
+    with open(os.path.join(admin_env["content"], "users.json"), "w") as f:
+        json.dump(users, f)
+
+    tdir = f"{admin_env['base']}/api/tournament/savannah-united/sporting-jax-2026"
+    pt = admin_env["publish_token"]
+    cases = [
+        # (bearer, publish_header, expected_status)
+        ("editor-token-jane", None, 403),          # editor role alone: no
+        ("editor-token-jane", pt, 200),            # editor + root header: yes (capability)
+        ("publisher-token-keith", None, 200),      # publisher role alone: yes
+        ("publisher-token-keith", pt, 200),        # publisher + header: yes
+        ("unknown-user", pt, 401),                 # unknown bearer: not an authenticated principal (header ≠ API identity)
+        (None, pt, 401),                           # no bearer: not authenticated at all
+        (None, "wrong-publish-token", 401),        # no bearer: auth gate first
+        ("editor-token-jane", "wrong-publish-token", 403),  # both wrong: no
+    ]
+    for bearer, header, expected in cases:
+        s, d = req("POST", f"{tdir}/publish", token=bearer,
+                   publish_token=header, body={"no_links": True})
+        assert s == expected, f"bearer={bearer} header={header}: got {s} {d.get('error','')} (want {expected})"
+    # The editor+header publish was audited with the capability path
+    with open(os.path.join(admin_env["content"], "out", "audit.log")) as f:
+        content = f.read()
+    assert '"actor": "Jane"' in content
+    assert "authority=root-publish-header" in content
+
+
+def test_new_tournament_uses_template_not_live_copy(admin_env):
+    """Scaffolding must come from _templates/tournament-v1 — never from a
+    live tournament — and return an incompleteness checklist."""
+    token = admin_env["admin_token"]
+    base = admin_env["base"]
+
+    s, d = req("POST", f"{base}/api/tournaments/new", token=token,
+               body={"org": "new-org", "slug": "disney-showcase-2027",
+                     "name": "Disney Showcase"})
+    assert s == 201, d
+    assert d["tournament"] == "new-org/disney-showcase-2027"
+    assert d["status"] == "draft"
+    # Checklist flags the required-but-empty fields
+    assert d["checklist"], "expected an incompleteness checklist"
+    fields = [c["field"] for c in d["checklist"]]
+    assert "tournament.name" in fields
+    assert "tournament.dates" in fields
+    assert "venue.name" in fields
+
+    # The new tournament must NOT contain live Sporting Jax content
+    tdir = os.path.join(admin_env["content"], "orgs", "new-org",
+                        "tournaments", "disney-showcase-2027")
+    with open(os.path.join(tdir, "tournament.json")) as f:
+        t = json.load(f)
+    assert t["tournament"]["name"] == ""  # template empty, not live data
+    # manifest has org + slug + draft + no revision
+    with open(os.path.join(tdir, "manifest.json")) as f:
+        m = json.load(f)
+    assert m["org"] == "new-org"
+    assert m["slug"] == "disney-showcase-2027"
+    assert m["status"] == "draft"
+    assert "revision" not in m

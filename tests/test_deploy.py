@@ -295,32 +295,50 @@ def test_concurrent_publish_serializes(app_repo, valid_target):
 def test_concurrent_publish_cross_process(app_repo, valid_target, tmp_path):
     """The flock must serialize across PROCESSES (CLI guide.py vs admin
     server), not just threads. Spawn a real subprocess that publishes to
-    the same clone while this process publishes concurrently. Both must
-    succeed; the remote must be valid and uncorrupted."""
+    the same clone while this process publishes concurrently — with a
+    ready barrier so both actually CONTEND (without it, subprocess
+    startup skew can make the test pass through sequential execution)."""
     import subprocess as sp
     import sys as _sys
 
-    # Worker script: import deploy, publish once, print status.
+    # Worker script: import deploy, signal READY, wait for GO, publish.
     targets_json = tmp_path / "targets.json"
+    ready_file = tmp_path / "worker.ready"
+    go_file = tmp_path / "worker.go"
     import json as _json
     with open(targets_json, "w") as f:
         _json.dump(valid_target, f)
     script = tmp_path / "publish_worker.py"
     script.write_text(
-        "import json, sys, os\n"
+        "import json, os, sys, time\n"
         f"sys.path.insert(0, {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))!r})\n"
         f"sys.path.insert(0, {os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts')!r})\n"
         "from deploy import deploy_tournament\n"
-        f"targets = json.load(open({str(targets_json)!r}))\n"
-        f"r = deploy_tournament({FIXTURE_TOURNAMENT!r}, targets=targets)\n"
+        "targets = json.load(open(" + repr(str(targets_json)) + "))\n"
+        "open(" + repr(str(ready_file)) + ", 'w').write('ready')\n"
+        "deadline = time.time() + 30\n"
+        "while not os.path.exists(" + repr(str(go_file)) + "):\n"
+        "    if time.time() > deadline: sys.exit(2)\n"
+        "    time.sleep(0.01)\n"
+        "r = deploy_tournament(" + repr(FIXTURE_TOURNAMENT) + ", targets=targets)\n"
         "print(r.status, flush=True)\n",
     )
 
-    # Start the subprocess worker and race it against this process
     proc = sp.Popen([_sys.executable, str(script)], stdout=sp.PIPE, stderr=sp.PIPE,
                     text=True)
-    # Publish from this process concurrently (the subprocess may win the
-    # lock — either order must be safe)
+    # Wait for the worker to be fully imported and READY — THEN release
+    # both at the same moment so they genuinely race for the lock.
+    deadline = 30
+    while not ready_file.exists():
+        if proc.poll() is not None:
+            break
+        import time
+        deadline -= 0.05
+        if deadline <= 0:
+            proc.kill()
+            raise AssertionError("worker never became ready")
+        time.sleep(0.05)
+    go_file.write_text("go")
     r = deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target)
     out, err = proc.communicate(timeout=60)
     worker_status = out.strip()
@@ -331,3 +349,27 @@ def test_concurrent_publish_cross_process(app_repo, valid_target, tmp_path):
     remote = read_remote(app_repo["workdir"])
     assert remote["tournament"]["name"] == "Sporting Jax Boys Invitational"
     assert git(app_repo["workdir"], "status", "--porcelain") == ""
+
+
+def test_mirror_failure_after_push_is_warning_not_reset(app_repo, valid_target, tmp_path):
+    """Once the push succeeds, the remote is LIVE: a mirror failure must
+    surface as published_with_warning and must NEVER reset the local clone
+    behind the remote (regression: the broad exception handler used to
+    roll back the worktree after a successful push)."""
+    # Make the mirror path unwritable: create a FILE where the dir should be
+    mirror_block = tmp_path / "mirror"
+    mirror_block.write_text("i am a file, not a directory")
+    mirror_path = mirror_block / "data.json"   # os.makedirs will fail
+    valid_target[FIXTURE_TOURNAMENT]["mirrorTo"] = str(mirror_path)
+    workdir = app_repo["workdir"]
+
+    result = deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target)
+    assert result.status == "published_with_warning", result.status
+    assert "mirror" in result.message
+
+    # The remote is live and the local clone was NOT reset behind it
+    head = git(workdir, "rev-parse", "HEAD")
+    remote = git(workdir, "rev-parse", "origin/main")
+    assert head == remote, "clone was reset after a successful push!"
+    # Local worktree is clean (the publish commit is present, not rolled back)
+    assert git(workdir, "status", "--porcelain") == ""

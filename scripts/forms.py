@@ -224,9 +224,35 @@ def _flatten_fields(fields):
     return out
 
 
+def _coerce(value, field):
+    if value is None or value == "":
+        # Empty optional → the key is DELETED, never set to None: the
+        # browser deletes empty optional keys on save, and a None value
+        # can violate a schema expecting a string. (Parity with app.js.)
+        return _EMPTY
+    if field["type"] in ("number", "integer"):
+        try:
+            return int(value) if field["type"] == "integer" else float(value)
+        except (TypeError, ValueError):
+            return value
+    if field["type"] == "boolean":
+        return bool(value) if isinstance(value, bool) else value in (True, "true", "on", "1")
+    return value
+
+
+class _Empty:
+    """Sentinel: the key should be removed from the output object."""
+    def __repr__(self):  # pragma: no cover
+        return "<empty>"
+
+
+_EMPTY = _Empty()
+
+
 def _set_path(obj, path, value, field):
     """path like 'venue.coordinates.lat' or 'games[].opponent' — repeater
-    indices are handled by the UI passing indexed paths (games[0].opponent)."""
+    indices are handled by the UI passing indexed paths (games[0].opponent).
+    Empty optional values delete the key instead of writing None."""
     parts = path.split(".")
     cur = obj
     for i, part in enumerate(parts):
@@ -238,12 +264,18 @@ def _set_path(obj, path, value, field):
             while len(cur[key]) <= idx:
                 cur[key].append({})
             if is_last:
-                cur[key][idx] = _coerce(value, field)
+                if value is _EMPTY:
+                    del cur[key][idx]
+                else:
+                    cur[key][idx] = _coerce(value, field)
             else:
                 cur = cur[key][idx]
         else:
             if is_last:
-                cur[part] = _coerce(value, field)
+                if value is _EMPTY:
+                    cur.pop(part, None)
+                else:
+                    cur[part] = _coerce(value, field)
             else:
                 cur.setdefault(part, {})
                 cur = cur[part]

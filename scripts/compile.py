@@ -49,27 +49,45 @@ class CompileError(PlatformError):
         super().__init__(message, exit_code=EXIT_CONFIG)
 
 
-def compile_bundle(tdir):
+def compile_bundle(tdir, overrides=None):
     """Assemble the bundle dict from module files.
+
+    overrides: {filename: json_text} — the given module content replaces
+    the file on disk for THIS compilation only. No file is ever written:
+    used by validate-proposed so a candidate module can be validated
+    without touching the live tournament directory (no swap, no restore,
+    no crash window, no concurrent-read hazard).
 
     Returns (bundle, used_modules, unknown_modules). Unknown modules are
     .json files in the tournament dir that are neither registered modules
     nor known metadata (manifest.json) — reported as warnings.
     """
+    overrides = overrides or {}
     bundle = {}
     used = []
     unknown = []
     for filename, keys, _required in MODULE_REGISTRY:
         path = os.path.join(tdir, filename)
-        if not os.path.exists(path):
-            continue
-        try:
-            module = load_json(path)
-        except json.JSONDecodeError as e:
-            raise CompileError(
-                f"{filename} is not valid JSON: {e.msg} (line {e.lineno}, col {e.colno}). "
-                f"Fix the syntax and re-run."
-            ) from e
+        if filename in overrides:
+            module_text = overrides[filename]
+            try:
+                module = json.loads(module_text)
+            except json.JSONDecodeError as e:
+                raise CompileError(
+                    f"{filename} (proposed content) is not valid JSON: "
+                    f"{e.msg} (line {e.lineno}, col {e.colno}). Fix the "
+                    f"syntax and re-run."
+                ) from e
+        else:
+            if not os.path.exists(path):
+                continue
+            try:
+                module = load_json(path)
+            except json.JSONDecodeError as e:
+                raise CompileError(
+                    f"{filename} is not valid JSON: {e.msg} (line {e.lineno}, col {e.colno}). "
+                    f"Fix the syntax and re-run."
+                ) from e
         for key in keys:
             if key not in module:
                 raise CompileError(

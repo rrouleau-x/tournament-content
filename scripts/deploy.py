@@ -231,6 +231,12 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
     # run can race the server: without serialization two requests can
     # both pass the clean-worktree check and interleave writes into
     # the same clone. flock() covers threads AND processes.
+    #
+    # Dry-runs acquire the same lock too: a preview must see a
+    # CONSISTENT view of the clone (fetch + diff), so it serializes
+    # with any concurrent publish. That briefly blocks a real publish
+    # during a preview — acceptable; the alternative (unsynchronized
+    # reads of a mutating workDir) is worse.
     def _locked_publish():
         workdir = workdir_override or verify_workdir(target)
         # 5. Fetch + semantic diff vs origin/main
@@ -268,6 +274,8 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
         # hard reset to this commit fully restores file + index + branch).
         rc, start_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
         start_head = start_head if rc == 0 else None
+        pushed = False          # becomes True once the remote is live
+        mirror_warning = None   # post-push warnings, never failures
 
         try:
             os.makedirs(os.path.dirname(git_data), exist_ok=True)
@@ -301,29 +309,38 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
                     f"(auth, remote URL, branch protection) and re-run deploy.",
                     exit_code=EXIT_PUBLISH)
 
-            # Post-push verification: local HEAD must equal origin/main
+            # Post-push verification: local HEAD must equal origin/main.
+            # From this point the REMOTE IS LIVE — nothing can roll back
+            # publication. Failures after this are warnings, never resets.
             rc, local_head, _ = run(["git", "rev-parse", "HEAD"], cwd=workdir)
             rc2, remote_head, _ = run(["git", "rev-parse", "origin/main"], cwd=workdir)
             if rc != 0 or rc2 != 0 or local_head != remote_head:
                 raise PlatformError(
                     "push reported ok but local HEAD ≠ origin/main — check the repo "
                     "manually before trusting publication.", exit_code=EXIT_PUBLISH)
+            pushed = True
 
-            # SUCCESS — only now update the mirror, atomically
+            # SUCCESS — only now update the mirror, atomically. A mirror
+            # failure must NOT flip the result to failure (the remote IS
+            # live) — it becomes a warning the operator can retry.
+            mirror_warning = None
             mirror = target.get("mirrorTo")
             if mirror:
                 mirror_path = os.path.expanduser(mirror)
-                os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
-                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(mirror_path),
-                                           prefix=".data.json.tmp.")
                 try:
-                    with os.fdopen(fd, "w", encoding="utf-8") as f:
-                        f.write(output)
-                    os.replace(tmp, mirror_path)
-                except BaseException:
-                    if os.path.exists(tmp):
-                        os.unlink(tmp)
-                    raise
+                    os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
+                    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(mirror_path),
+                                               prefix=".data.json.tmp.")
+                    try:
+                        with os.fdopen(fd, "w", encoding="utf-8") as f:
+                            f.write(output)
+                        os.replace(tmp, mirror_path)
+                    except BaseException:
+                        if os.path.exists(tmp):
+                            os.unlink(tmp)
+                        raise
+                except Exception as e:  # noqa: BLE001
+                    mirror_warning = f"published, but mirror not updated: {e}"
 
             # SUCCESS — record the published transition in the source manifest.
             # Opt-in (record_published): only the real CLI/server entry points
@@ -335,19 +352,24 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
                 except Exception as e:  # noqa: BLE001
                     bookkeeping_warning = f"published, but source manifest not updated: {e}"
 
-            status = "published_with_warning" if bookkeeping_warning else "published"
+            warnings_list = [w for w in (mirror_warning, bookkeeping_warning) if w]
+            status = "published_with_warning" if warnings_list else "published"
             msg = (f"published {digest[:10]} → {target['repo']}/{app_path}"
-                   + (f" · WARNING: {bookkeeping_warning}" if bookkeeping_warning else ""))
+                   + (f" · WARNING: {'; '.join(warnings_list)}" if warnings_list else ""))
             return DeployResult(
                 status, msg, EXIT_OK, tournament, digest=digest, changed=True,
                 warnings=summary["warnings"],
                 destination=f"{target['repo']}/{app_path}")
         except PlatformError:
-            # Pre-push failure → roll back to starting state, never touch mirror
-            _restore_worktree(workdir, start_head)
+            # Pre-push failure → roll back to starting state, never touch
+            # mirror. Post-push (pushed=True): the remote is LIVE — resetting
+            # the local clone would hide that; re-raise without restore.
+            if not pushed:
+                _restore_worktree(workdir, start_head)
             raise
         except BaseException:
-            _restore_worktree(workdir, start_head)
+            if not pushed:
+                _restore_worktree(workdir, start_head)
             raise
 
 
@@ -370,18 +392,50 @@ def _record_published(tdir, digest):
             != os.path.realpath(repo_orgs):
         return
     manifest_path = os.path.join(tdir, "manifest.json")
-    write_revision(tdir, REVISION_PUBLISHED, digest, manifest=None)
-    # Commit the manifest change to the content repo (best-effort — the
-    # app repo publication already succeeded; this is source-of-truth
-    # bookkeeping so the revision workflow reflects reality).
-    rc, _, err = run(["git", "add", os.path.relpath(manifest_path, REPO_ROOT)], cwd=REPO_ROOT)
-    if rc != 0:
-        raise RuntimeError(f"git add manifest failed: {err}")
-    msg = f"revision: mark {os.path.basename(tdir)} published (digest {digest[:10]})"
-    rc, _, err = run(["git", "commit", "-m", msg, "--",
-                      os.path.relpath(manifest_path, REPO_ROOT)], cwd=REPO_ROOT)
-    if rc != 0 and "nothing to commit" not in err:
-        raise RuntimeError(f"git commit manifest failed: {err}")
+    # Serialize ALL content-repo git add/commit bookkeeping across
+    # tournaments AND processes: two tournaments publishing to different
+    # app repos must not run concurrent `git add`/`git commit` against the
+    # same content-repo index (mixing manifests or attaching one commit's
+    # record to another). The app workDir lock only serializes per
+    # destination clone — this lock is keyed by the SOURCE repo instead.
+    with _content_repo_lock():
+        write_revision(tdir, REVISION_PUBLISHED, digest, manifest=None)
+        # Commit the manifest change to the content repo (best-effort — the
+        # app repo publication already succeeded; this is source-of-truth
+        # bookkeeping so the revision workflow reflects reality).
+        rc, _, err = run(["git", "add", os.path.relpath(manifest_path, REPO_ROOT)], cwd=REPO_ROOT)
+        if rc != 0:
+            raise RuntimeError(f"git add manifest failed: {err}")
+        msg = f"revision: mark {os.path.basename(tdir)} published (digest {digest[:10]})"
+        rc, _, err = run(["git", "commit", "-m", msg, "--",
+                          os.path.relpath(manifest_path, REPO_ROOT)], cwd=REPO_ROOT)
+        if rc != 0 and "nothing to commit" not in err:
+            raise RuntimeError(f"git commit manifest failed: {err}")
+
+
+_content_repo_locks = {}
+_content_repo_locks_guard = threading.Lock()
+
+
+@contextmanager
+def _content_repo_lock():
+    """Cross-process exclusive lock keyed by REPO_ROOT, held across the
+    content-repo git add/commit sequence. Lock file lives in /tmp (outside
+    any git repo) so it never dirties the worktree."""
+    lock_dir = os.path.join(tempfile.gettempdir(), "tournament-content-locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    safe = hashlib.sha256(os.path.realpath(REPO_ROOT).encode()).hexdigest()[:16]
+    path = os.path.join(lock_dir, f"content-{safe}.lock")
+    with _content_repo_locks_guard:
+        if path not in _content_repo_locks:
+            _content_repo_locks[path] = threading.Lock()
+    with _content_repo_locks[path]:
+        with open(path, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def _restore_worktree(workdir, start_head):

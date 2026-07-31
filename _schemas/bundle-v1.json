@@ -172,6 +172,7 @@
         "details": { "type": "string" },
         "forecastLink": { "type": "string" },
         "source": { "type": "string", "description": "Provenance of this forecast (e.g. National Weather Service)" },
+        "sourceApiUrl": { "type": "string", "format": "uri", "description": "Machine-readable source API URL (provenance, not a parent link)" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "When the forecast was fetched" }
       },
       "additionalProperties": false

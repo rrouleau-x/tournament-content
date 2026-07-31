@@ -37,6 +37,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from compile import compile_bundle, content_digest, serialize  # noqa: E402
 from pipeline import (  # noqa: E402
     EXIT_BLOCKED,
@@ -263,6 +264,16 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
                     os.unlink(tmp)
                 raise
 
+        # SUCCESS — record the published transition in the source manifest
+        # (only when the tournament lives inside the content repo; tests
+        # using scratch dirs skip this). Best-effort: publication itself
+        # already succeeded — a manifest-record failure must not flip the
+        # result to failure.
+        try:
+            _record_published(tdir, digest)
+        except Exception as e:  # noqa: BLE001
+            print(f"      warning: could not record published revision: {e}")
+
         return DeployResult(
             "published", f"published {digest[:10]} → {target['repo']}/{app_path}",
             EXIT_OK, tournament, digest=digest, changed=True,
@@ -275,6 +286,32 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
     except BaseException:
         _restore_worktree(workdir, start_head)
         raise
+
+
+def _record_published(tdir, digest):
+    """After a successful push, stamp the source manifest revision as
+    published (with the exact digest + timestamp) and commit it to the
+    content repo. Only runs when the tournament dir is inside the content
+    repo (tests with scratch dirs are skipped)."""
+    from pipeline import REVISION_PUBLISHED, write_revision
+    # Only record when the tournament is actually part of the content repo
+    repo_orgs = os.path.join(REPO_ROOT, "orgs")
+    if os.path.commonpath([os.path.realpath(tdir), os.path.realpath(repo_orgs)]) \
+            != os.path.realpath(repo_orgs):
+        return
+    manifest_path = os.path.join(tdir, "manifest.json")
+    write_revision(tdir, REVISION_PUBLISHED, digest, manifest=None)
+    # Commit the manifest change to the content repo (best-effort — the
+    # app repo publication already succeeded; this is source-of-truth
+    # bookkeeping so the revision workflow reflects reality).
+    rc, _, err = run(["git", "add", os.path.relpath(manifest_path, REPO_ROOT)], cwd=REPO_ROOT)
+    if rc != 0:
+        raise RuntimeError(f"git add manifest failed: {err}")
+    msg = f"revision: mark {os.path.basename(tdir)} published (digest {digest[:10]})"
+    rc, _, err = run(["git", "commit", "-m", msg, "--",
+                      os.path.relpath(manifest_path, REPO_ROOT)], cwd=REPO_ROOT)
+    if rc != 0 and "nothing to commit" not in err:
+        raise RuntimeError(f"git commit manifest failed: {err}")
 
 
 def _restore_worktree(workdir, start_head):

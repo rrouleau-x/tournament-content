@@ -5,3 +5,4 @@ out/
 .DS_Store
 .pytest_cache/
 .admin-token
+.publish-token

@@ -1,68 +1,108 @@
 #!/usr/bin/env python3
-"""Admin server for the Tournament Platform — local-only HTTP API + static UI.
+"""Admin server for the Tournament Platform — HTTP API + static UI.
 
 Serves the admin web UI and exposes the pipeline (compile/validate/approve/
-publish) as JSON endpoints. Binds to 127.0.0.1 by default — this is admin
-tooling, NOT parent-facing. The PWA is never touched; this server only reads
-and writes the content repo through the existing pipeline functions.
+publish/autofill) as JSON endpoints. Binds to 127.0.0.1 by default; use a
+tunnel only after reading the AUTH section. The PWA is never touched; this
+server only reads and writes the content repo through pipeline functions.
 
-AUTH: if ADMIN_TOKEN is set (env or ~/.hermes/www/content/.admin-token),
-every /api/* request must include `Authorization: Bearer <token>`. The UI
-prompts for the token once and stores it in localStorage. Set a token before
-exposing the server through any tunnel — the API can publish content.
+SECURITY MODEL (per external design review — internet-facing):
+  - Two-role tokens: ADMIN_TOKEN (editor: everything except publish) and
+    PUBLISH_TOKEN (required IN ADDITION for publish). Publish is the only
+    action that can reach parents, so it needs its own credential.
+  - allow_draft is NEVER accepted over HTTP — it is CLI-only emergency use.
+  - Strict identifier validation: org/slug must match
+    ^[a-z0-9][a-z0-9-]{0,63}$; module names must be in MODULE_REGISTRY.
+    All paths are realpath-resolved and containment-checked.
+  - No /static/ file handler (UI is a single HTML file). The only file
+    served is admin_ui/index.html — nothing else can be read via the server.
+  - Request bodies limited to 1 MB. Responses carry a restrictive CSP.
+  - Every state-changing action is written to out/audit.log (append-only).
 
 Usage:
-    ADMIN_TOKEN=secret python3 scripts/admin_server.py [--port 8899] [--host 127.0.0.1]
+    ADMIN_TOKEN=... PUBLISH_TOKEN=... python3 scripts/admin_server.py [--port 8899]
+
+Tokens come from env vars, else auto-generated files (.admin-token and
+.publish-token, mode 0600, gitignored).
 
 Endpoints:
-    GET  /                              admin UI (static files)
+    GET  /                              admin UI (index.html only)
     GET  /api/tournaments               list tournaments + status/revision
-    GET  /api/tournament/<org>/<slug>   modules + manifest + digest + health
-    PUT  /api/tournament/<org>/<slug>/module/<name>   save a module file
+    GET  /api/tournament/<org>/<slug>   modules + digests + manifest + health
+    PUT  /api/tournament/<org>/<slug>/module/<name>   save (requires baseDigest)
     POST /api/tournament/<org>/<slug>/validate        Guide Health Report (JSON)
     POST /api/tournament/<org>/<slug>/preview         dry-run publish diff
-    POST /api/tournament/<org>/<slug>/approve         approve current digest
-    POST /api/tournament/<org>/<slug>/publish         transactional publish
+    POST /api/tournament/<org>/<slug>/approve         approve current digest (validates first)
+    POST /api/tournament/<org>/<slug>/publish         publish (requires PUBLISH_TOKEN; no allow_draft)
+    POST /api/tournament/<org>/<slug>/autofill/<mod>  draft-fill a module
     POST /api/tournaments/new                          scaffold from template (draft)
 """
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
 import sys
+import threading
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
 
-UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "admin_ui")
+UI_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "admin_ui"))
 TOKEN_FILE = os.path.join(REPO_ROOT, ".admin-token")
+PUBLISH_TOKEN_FILE = os.path.join(REPO_ROOT, ".publish-token")
+AUDIT_LOG = os.path.join(REPO_ROOT, "out", "audit.log")
+MAX_BODY = 1_000_000  # 1 MB
+
+IDENT_RE = r"^[a-z0-9][a-z0-9-]{0,63}$"
+_audit_lock = threading.Lock()
 
 
-def load_token():
-    """Token from env ADMIN_TOKEN, else from .admin-token file. If neither
-    exists, generate one and write it to the file (so the operator can find
-    it). Returns the token or None if auth is disabled."""
-    token = os.environ.get("ADMIN_TOKEN", "")
+def _load_or_create_token(env_name, path):
+    token = os.environ.get(env_name, "")
     if token:
         return token
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, encoding="utf-8") as f:
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
             return f.read().strip() or None
     token = secrets.token_urlsafe(24)
     try:
-        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(token + "\n")
-        os.chmod(TOKEN_FILE, 0o600)
-        print(f"[admin] generated token → {TOKEN_FILE}", file=sys.stderr)
+        os.chmod(path, 0o600)
+        print(f"[admin] generated {env_name} → {path}", file=sys.stderr)
     except OSError:
         pass
     return token
 
 
-ADMIN_TOKEN = load_token()
+ADMIN_TOKEN = _load_or_create_token("ADMIN_TOKEN", TOKEN_FILE)
+PUBLISH_TOKEN = _load_or_create_token("PUBLISH_TOKEN", PUBLISH_TOKEN_FILE)
+
+
+def audit(actor, action, tournament, digest=None, detail=None):
+    """Append-only audit log. Never raises (logging must not break the API).
+    Path computed at call time so tests that redirect REPO_ROOT work."""
+    try:
+        entry = {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "actor": actor,
+            "action": action,
+            "tournament": tournament,
+            "digest": digest,
+            "detail": detail,
+        }
+        log_path = os.path.join(REPO_ROOT, "out", "audit.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with _audit_lock:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
 
 
 def api_ok(data, status=200):
@@ -74,6 +114,48 @@ def api_err(message, status=400, exit_code=None):
     return api_ok({"error": message, "exit_code": exit_code}, status)
 
 
+def valid_identifier(value):
+    import re
+    return bool(re.match(IDENT_RE, value or ""))
+
+
+def tournament_path(org, slug):
+    return os.path.join(REPO_ROOT, "orgs", org, "tournaments", slug)
+
+
+def safe_tournament_dir(org, slug):
+    """Validate identifiers and enforce containment under orgs/. Returns the
+    realpath'd tournament dir. Raises ValueError on any violation."""
+    if not valid_identifier(org) or not valid_identifier(slug):
+        raise ValueError(f"invalid org/slug (must match {IDENT_RE})")
+    tdir = os.path.realpath(tournament_path(org, slug))
+    orgs_root = os.path.realpath(os.path.join(REPO_ROOT, "orgs"))
+    if os.path.commonpath([tdir, orgs_root]) != orgs_root:
+        raise ValueError("path escapes the orgs/ root")
+    return tdir
+
+
+def safe_module_path(tdir, module):
+    """Module filename must be a registered module (or manifest.json) and
+    resolve inside the tournament dir."""
+    from pipeline import MODULE_REGISTRY
+    if module == "manifest.json":
+        fname = module
+    else:
+        registered = {f for f, _k, _r in MODULE_REGISTRY}
+        if module not in registered:
+            raise ValueError(f"unknown module '{module}'")
+        fname = module
+    fpath = os.path.realpath(os.path.join(tdir, fname))
+    if os.path.commonpath([fpath, tdir]) != tdir:
+        raise ValueError("module path escapes tournament dir")
+    return fpath
+
+
+def module_digest(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
 def list_tournaments():
     import glob
     out = []
@@ -82,7 +164,8 @@ def list_tournaments():
             continue
         rel = os.path.relpath(d, os.path.join(REPO_ROOT, "orgs"))
         org, slug = rel.split(os.sep + "tournaments" + os.sep)
-        entry = {"org": org, "slug": slug, "tournament": f"{org}/{slug}", "status": "?", "revision": {}}
+        entry = {"org": org, "slug": slug, "tournament": f"{org}/{slug}",
+                 "status": "?", "revision": {}}
         mpath = os.path.join(d, "manifest.json")
         if os.path.exists(mpath):
             try:
@@ -98,28 +181,27 @@ def list_tournaments():
     return out
 
 
-def tournament_path(org, slug):
-    return os.path.join(REPO_ROOT, "orgs", org, "tournaments", slug)
-
-
 def get_tournament(org, slug):
     from compile import compile_bundle, content_digest, serialize
     from pipeline import load_manifest, MODULE_REGISTRY
-    tdir = tournament_path(org, slug)
+    tdir = safe_tournament_dir(org, slug)
     if not os.path.isdir(tdir):
         return None
     bundle, used, unknown = compile_bundle(tdir)
     output = serialize(bundle)
     manifest = load_manifest(tdir)
-    # Raw module file contents (source of truth for editing). The UI edits
-    # these files directly — saving writes them back verbatim.
+    # Raw module file contents + per-module digests (for optimistic
+    # concurrency: the UI must send back the digest it read).
     module_files = {}
+    module_digests = {}
     for filename, _keys, _req in MODULE_REGISTRY:
         fpath = os.path.join(tdir, filename)
         if os.path.isfile(fpath):
             try:
                 with open(fpath, encoding="utf-8") as f:
-                    module_files[filename] = f.read()
+                    content = f.read()
+                module_files[filename] = content
+                module_digests[filename] = module_digest(content)
             except OSError:
                 module_files[filename] = None
     return {
@@ -131,7 +213,28 @@ def get_tournament(org, slug):
         "unknownModules": unknown,
         "bundle": bundle,
         "moduleFiles": module_files,
+        "moduleDigests": module_digests,
     }
+
+
+def atomic_write(path, content):
+    """Write via temp file + os.replace in the same directory (atomic on
+    POSIX — a crash never leaves a partial module file)."""
+    d = os.path.dirname(path)
+    fd, tmp = tempfile_path(d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def tempfile_path(d):
+    import tempfile
+    return tempfile.mkstemp(dir=d, prefix=".tmp-", suffix=".json")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -151,15 +254,31 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length == 0:
             return {}
+        if length > MAX_BODY:
+            raise ValueError("request body too large")
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
+    # ── auth ────────────────────────────────────────────────────────────
+    def _bearer(self):
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Bearer "):
+            return header[len("Bearer "):].strip()
+        return ""
+
     def _authorized(self):
-        """Require Bearer token on /api/* routes (unless auth disabled)."""
         if not ADMIN_TOKEN:
             return True
-        header = self.headers.get("Authorization", "")
-        expected = f"Bearer {ADMIN_TOKEN}"
-        return secrets.compare_digest(header, expected)
+        token = self._bearer()
+        return bool(token) and secrets.compare_digest(token, ADMIN_TOKEN)
+
+    def _publish_authorized(self):
+        """Publish requires PUBLISH_TOKEN in the X-Publish-Token header AND
+        admin auth. If PUBLISH_TOKEN is unset, publish is refused (safer
+        than allowing it by accident)."""
+        if not PUBLISH_TOKEN:
+            return False
+        header = self.headers.get("X-Publish-Token", "")
+        return bool(header) and secrets.compare_digest(header.strip(), PUBLISH_TOKEN)
 
     def _guard_api(self):
         if not self._authorized():
@@ -167,37 +286,43 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _actor(self):
+        return "token:" + self._bearer()[:8] if self._bearer() else "anonymous"
+
+    def _send_csp(self, status, headers, body):
+        headers = dict(headers)
+        headers.setdefault("Content-Security-Policy",
+                           "default-src 'self'; script-src 'self'; "
+                           "style-src 'self' 'unsafe-inline'; connect-src 'self'")
+        headers.setdefault("X-Content-Type-Options", "nosniff")
+        self._send(status, headers, body)
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/" or path == "/index.html":
-            fpath = os.path.join(UI_DIR, "index.html")
-            if not os.path.exists(fpath):
-                return self._send(404, {"Content-Type": "text/plain"}, b"admin UI not built")
+            fpath = os.path.realpath(os.path.join(UI_DIR, "index.html"))
+            # Serve ONLY index.html — containment enforced, nothing else.
+            if os.path.commonpath([fpath, UI_DIR]) != UI_DIR or not os.path.isfile(fpath):
+                return self._send(404, {"Content-Type": "text/plain"}, b"not found")
             with open(fpath, "rb") as f:
-                return self._send(200, {"Content-Type": "text/html; charset=utf-8"}, f.read())
-        if path.startswith("/static/"):
-            fpath = os.path.join(UI_DIR, path[len("/static/"):])
-            if os.path.isfile(fpath):
-                ctype = "text/javascript" if fpath.endswith(".js") else (
-                    "text/css" if fpath.endswith(".css") else "application/octet-stream")
-                with open(fpath, "rb") as f:
-                    return self._send(200, {"Content-Type": ctype}, f.read())
-            return self._send(404, {"Content-Type": "text/plain"}, b"not found")
+                return self._send_csp(200, {"Content-Type": "text/html; charset=utf-8"}, f.read())
         if not path.startswith("/api/"):
             return self._send(*api_err("not found", 404))
         if not self._guard_api():
             return
-        if path == "/api/tournaments":
-            return self._send(*api_ok({"tournaments": list_tournaments()}))
-        if path.startswith("/api/tournament/"):
-            parts = path.split("/")
-            # /api/tournament/<org>/<slug>
-            if len(parts) == 5:
-                org, slug = unquote(parts[3]), unquote(parts[4])
-                data = get_tournament(org, slug)
-                if data is None:
-                    return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
-                return self._send(*api_ok(data))
+        try:
+            if path == "/api/tournaments":
+                return self._send(*api_ok({"tournaments": list_tournaments()}))
+            if path.startswith("/api/tournament/"):
+                parts = path.split("/")
+                if len(parts) == 5:
+                    org, slug = unquote(parts[3]), unquote(parts[4])
+                    data = get_tournament(org, slug)
+                    if data is None:
+                        return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
+                    return self._send(*api_ok(data))
+        except ValueError as e:
+            return self._send(*api_err(str(e), 400))
         return self._send(*api_err("not found", 404))
 
     def do_PUT(self):
@@ -208,24 +333,32 @@ class Handler(BaseHTTPRequestHandler):
         # PUT /api/tournament/<org>/<slug>/module/<name>
         if len(parts) == 7 and parts[5] == "module":
             org, slug, module = unquote(parts[3]), unquote(parts[4]), unquote(parts[6])
-            tdir = tournament_path(org, slug)
-            if not os.path.isdir(tdir):
-                return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
-            body = self._read_json()
-            content = body.get("content")
-            if content is None:
-                return self._send(*api_err("missing 'content' in body"))
             try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError as e:
-                return self._send(*api_err(f"invalid JSON: {e.msg} (line {e.lineno})"))
-            fpath = os.path.join(tdir, module)
-            if not os.path.isfile(fpath):
-                return self._send(*api_err(f"module {module} does not exist"))
-            with open(fpath, "w", encoding="utf-8") as f:
-                json.dump(parsed, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-            return self._send(*api_ok({"saved": module, "org": org, "slug": slug}))
+                tdir = safe_tournament_dir(org, slug)
+                if not os.path.isdir(tdir):
+                    return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
+                fpath = safe_module_path(tdir, module)
+                body = self._read_json()
+                content = body.get("content")
+                if content is None:
+                    return self._send(*api_err("missing 'content' in body"))
+                json.loads(content)  # must parse before we touch the file
+                # Optimistic concurrency: require the digest the client read
+                expected = body.get("baseDigest")
+                if expected is not None:
+                    with open(fpath, encoding="utf-8") as f:
+                        live = f.read()
+                    if module_digest(live) != expected:
+                        return self._send(*api_err(
+                            "conflict — module changed since you loaded it (stale "
+                            "edit). Reload and re-apply.", 409))
+                atomic_write(fpath, content)
+                audit(self._actor(), "module.save", f"{org}/{slug}",
+                      digest=module_digest(content), detail=module)
+                return self._send(*api_ok({"saved": module, "org": org, "slug": slug,
+                                           "digest": module_digest(content)}))
+            except ValueError as e:
+                return self._send(*api_err(str(e), 400))
         return self._send(*api_err("not found", 404))
 
     def do_POST(self):
@@ -236,28 +369,34 @@ class Handler(BaseHTTPRequestHandler):
         # POST /api/tournament/<org>/<slug>/autofill/<module>
         if len(parts) == 7 and parts[5] == "autofill":
             org, slug, module = unquote(parts[3]), unquote(parts[4]), unquote(parts[6])
-            tdir = tournament_path(org, slug)
-            if not os.path.isdir(tdir):
-                return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
-            body = self._read_json()
-            return self._send(*self._autofill(org, slug, module, body))
+            try:
+                tdir = safe_tournament_dir(org, slug)
+                if not os.path.isdir(tdir):
+                    return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
+                body = self._read_json()
+                return self._send(*self._autofill(org, slug, module, body))
+            except ValueError as e:
+                return self._send(*api_err(str(e), 400))
         if len(parts) == 6 and parts[5] in ("validate", "preview", "approve", "publish"):
             org, slug, action = unquote(parts[3]), unquote(parts[4]), parts[5]
-            body = self._read_json()
-            tdir = tournament_path(org, slug)
-            if not os.path.isdir(tdir):
-                return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
-            return self._send(*self._run_action(org, slug, action, body))
+            try:
+                tdir = safe_tournament_dir(org, slug)
+                if not os.path.isdir(tdir):
+                    return self._send(*api_err(f"no tournament at {org}/{slug}", 404))
+                body = self._read_json()
+                return self._send(*self._run_action(org, slug, action, body))
+            except ValueError as e:
+                return self._send(*api_err(str(e), 400))
         if path == "/api/tournaments/new":
             body = self._read_json()
             return self._send(*self._new_tournament(body))
         return self._send(*api_err("not found", 404))
 
     def _autofill(self, org, slug, module, body):
-        """Fill a module from body: {url} or {data} (module-specific).
-        Always writes draft content — never publishes."""
+        """Fill a module from body: {url} or {data}. Always draft — never
+        publishes. Rules URL fetching is SSRF-guarded (see autofill.safe_fetch)."""
         from autofill import fill_hotels, fill_rules, fill_schedule, fill_weather
-        tdir = tournament_path(org, slug)
+        tdir = safe_tournament_dir(org, slug)
         module = module if module.endswith(".json") else module + ".json"
         try:
             if module == "weather.json":
@@ -298,6 +437,7 @@ class Handler(BaseHTTPRequestHandler):
                                f"(supported: weather, schedule, rules, hotels)")
         except Exception as e:
             return api_err(f"{type(e).__name__}: {e}", 500)
+        audit(self._actor(), "autofill", f"{org}/{slug}", detail=module)
         return api_ok({"module": module, "message": msg, "draft": True,
                        "note": "Draft content — validate, then approve, then publish"})
 
@@ -307,12 +447,13 @@ class Handler(BaseHTTPRequestHandler):
             if action == "validate":
                 from validate import Report, run_checks
                 from compile import compile_bundle
-                tdir = tournament_path(org, slug)
+                tdir = safe_tournament_dir(org, slug)
                 bundle, _, _ = compile_bundle(tdir)
                 report = Report()
                 run_checks(bundle, report,
                            run_link_checks=not body.get("no_links", False),
                            tdir=tdir)
+                audit(self._actor(), "validate", tournament)
                 return api_ok({"tournament": tournament, **report.to_dict()})
             if action == "preview":
                 from deploy import deploy_tournament
@@ -321,55 +462,66 @@ class Handler(BaseHTTPRequestHandler):
                     result = deploy_tournament(
                         tournament, dry_run=True,
                         run_link_checks=not body.get("no_links", False))
+                    audit(self._actor(), "preview", tournament)
                     return api_ok(result.to_dict())
                 except PlatformError as e:
                     return api_ok({"status": "error", "message": str(e),
                                    "exit_code": e.exit_code}, 200)
             if action == "approve":
-                from compile import compile_bundle, content_digest, serialize
-                from pipeline import REVISION_APPROVED, write_revision
-                tdir = tournament_path(org, slug)
-                bundle, _, _ = compile_bundle(tdir)
-                digest = content_digest(serialize(bundle))
-                write_revision(tdir, REVISION_APPROVED, digest,
-                               reviewer=body.get("reviewer", "admin"))
-                return api_ok({"tournament": tournament, "digest": digest,
-                               "workflow": REVISION_APPROVED})
+                # Shared path with the CLI: compiles + validates + records.
+                from pipeline import PlatformError
+                try:
+                    result = approve_tournament(safe_tournament_dir(org, slug),
+                                                reviewer=body.get("reviewer", "admin"))
+                    audit(self._actor(), "approve", tournament, digest=result["digest"])
+                    return api_ok(result)
+                except PlatformError as e:
+                    return api_ok({"status": "error", "message": str(e),
+                                   "exit_code": e.exit_code}, 200)
             if action == "publish":
+                # NO allow_draft over HTTP — publish must go through the
+                # approval gate. Requires PUBLISH_TOKEN (separate credential).
+                if not self._publish_authorized():
+                    return api_err(
+                        "publish requires the publish token (X-Publish-Token "
+                        "header) — this credential is separate from the editor "
+                        "token, and draft publication is not allowed over the API",
+                        403)
                 from deploy import deploy_tournament
                 from pipeline import PlatformError
                 try:
                     result = deploy_tournament(
                         tournament,
                         run_link_checks=not body.get("no_links", False),
-                        allow_draft=body.get("allow_draft", False))
+                        allow_draft=False)
+                    audit(self._actor(), "publish", tournament,
+                          digest=result.digest, detail=result.status)
                     return api_ok(result.to_dict())
                 except PlatformError as e:
+                    audit(self._actor(), "publish.failed", tournament, detail=str(e)[:200])
                     return api_ok({"status": "error", "message": str(e),
                                    "exit_code": e.exit_code}, 200)
-        except Exception as e:  # keep the UI alive; surface the error
+        except Exception as e:
             return api_err(f"{type(e).__name__}: {e}", 500)
         return api_err("unknown action", 400)
 
     def _new_tournament(self, body):
         org = body.get("org", "").strip()
         slug = body.get("slug", "").strip()
-        if not org or not slug:
-            return api_err("org and slug are required")
-        from pipeline import PlatformError, parse_tournament_id
         try:
+            from pipeline import parse_tournament_id
             parse_tournament_id(f"{org}/{slug}")
-        except PlatformError as e:
+            tdir = safe_tournament_dir(org, slug)
+        except Exception as e:
             return api_err(str(e))
-        dst = tournament_path(org, slug)
-        if os.path.exists(dst):
+        if os.path.exists(tdir):
             return api_err(f"tournament {org}/{slug} already exists")
         src = os.path.join(REPO_ROOT, "orgs", org, "tournaments", "sporting-jax-2026")
         if not os.path.isdir(src):
             return api_err("template tournament missing (sporting-jax-2026)")
         import shutil
-        shutil.copytree(src, dst)
-        mpath = os.path.join(dst, "manifest.json")
+        shutil.copytree(src, tdir)
+        mpath = os.path.join(tdir, "manifest.json")
         with open(mpath, encoding="utf-8") as f:
             m = json.load(f)
         m["slug"] = slug
@@ -379,8 +531,15 @@ class Handler(BaseHTTPRequestHandler):
         with open(mpath, "w", encoding="utf-8") as f:
             json.dump(m, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        return api_ok({"tournament": f"{org}/{slug}", "status": "draft"},
-                      status=201)
+        audit(self._actor(), "tournament.new", f"{org}/{slug}")
+        return api_ok({"tournament": f"{org}/{slug}", "status": "draft"}, status=201)
+
+
+def approve_tournament(tdir, reviewer="admin"):
+    """Shared approve path (CLI + HTTP) — lives in pipeline.py so both
+    entry points use identical validation + recording."""
+    from pipeline import approve_tournament as _impl
+    return _impl(tdir, reviewer=reviewer)
 
 
 def main():
@@ -390,7 +549,9 @@ def main():
     args = ap.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Admin server: http://{args.host}:{args.port}  (Ctrl-C to stop)")
-    print(f"  UI: {os.path.abspath(UI_DIR)}")
+    print(f"  UI: {UI_DIR}")
+    print(f"  editor token: {TOKEN_FILE}  · publish token: {PUBLISH_TOKEN_FILE}")
+    print(f"  audit log: {AUDIT_LOG}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

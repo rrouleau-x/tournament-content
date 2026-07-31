@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -51,11 +52,48 @@ def load_module(tdir, filename):
 
 
 def write_module(tdir, filename, data):
-    """Write a module file atomically. The top-level key must be present."""
+    """Write a module file atomically (temp + os.replace). VALIDATES FIRST:
+    the candidate is compiled into a bundle and checked; if validation has
+    blocking issues the file is NOT written (the original stays intact)."""
     path = os.path.join(tdir, filename)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    import tempfile
+    import compile as compile_mod
+    from validate import Report, run_checks
+
+    original = None
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            original = f.read()
+
+    # 1. Write candidate atomically over the real path
+    fd, tmp = tempfile.mkstemp(dir=tdir, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+    # 2. Compile + validate the tournament with the candidate in place
+    bundle, _, _ = compile_mod.compile_bundle(tdir)
+    report = Report()
+    run_checks(bundle, report, run_link_checks=False, tdir=tdir)
+    blocking = report.blocking()
+    if blocking:
+        # Restore the original so a failed validation leaves the module
+        # exactly as it was
+        if original is not None:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(original)
+        else:
+            os.unlink(path)
+        msgs = "; ".join(m for _, _, m in blocking[:5])
+        raise PlatformError(
+            f"autofill output fails validation ({len(blocking)} blocking): {msgs}. "
+            f"Module NOT written — fix the input data.")
     return path
 
 
@@ -65,7 +103,92 @@ def fetch_json(url, headers=None):
         return json.loads(resp.read().decode("utf-8"))
 
 
+# ── SSRF-safe fetching ──────────────────────────────────────────────────
+
+import ipaddress
+import socket
+
+PRIVATE_RANGES = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),      # link-local
+    ipaddress.ip_network("100.64.0.0/10"),       # CGNAT
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),            # ULA
+    ipaddress.ip_network("fe80::/10"),           # link-local v6
+    ipaddress.ip_network("::/128"),
+)
+
+
+def _is_public_host(host):
+    """Resolve a hostname and reject any private/loopback/link-local/reserved
+    address. Returns (ok, reason)."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False, f"cannot resolve '{host}'"
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved \
+           or ip.is_multicast or ip.is_unspecified:
+            return False, f"destination resolves to non-public address {ip}"
+    if not infos:
+        return False, "no addresses resolved"
+    return True, ""
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validate every redirect target against SSRF rules."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        from urllib.parse import urlparse as _up
+        target = _up(newurl)
+        if target.scheme not in ("https", "http"):
+            raise urllib.error.URLError(f"redirect to disallowed scheme {target.scheme}")
+        ok, reason = _is_public_host(target.hostname)
+        if not ok:
+            raise urllib.error.URLError(f"redirect blocked: {reason}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def safe_fetch_text(url, max_bytes=1_000_000):
+    """Fetch a URL server-side with SSRF guards: HTTPS/HTTP only, public
+    destination only (loopback/private/link-local/reserved blocked before
+    connect and on every redirect), response size limited. Returns text."""
+    from urllib.parse import urlparse as _up
+    parsed = _up(url)
+    if parsed.scheme not in ("https", "http"):
+        raise PlatformError(f"only http/https URLs allowed, got '{parsed.scheme}'")
+    if not parsed.hostname:
+        raise PlatformError("URL has no host")
+    ok, reason = _is_public_host(parsed.hostname)
+    if not ok:
+        raise PlatformError(f"URL blocked: {reason}")
+
+    opener = urllib.request.build_opener(_SafeRedirectHandler())
+    req = urllib.request.Request(url, headers={"User-Agent": "tournament-content-autofill/1.0"})
+    try:
+        with opener.open(req, timeout=20) as resp:
+            chunks = []
+            total = 0
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise PlatformError(f"response exceeds {max_bytes} byte limit")
+                chunks.append(chunk)
+            return b"".join(chunks).decode("utf-8", errors="replace")
+    except urllib.error.URLError as e:
+        raise PlatformError(f"fetch failed: {e.reason}") from e
+
+
 def fetch_text(url):
+    """Plain fetch for internal/trusted use (NWS API)."""
     req = urllib.request.Request(url, headers={"User-Agent": "tournament-content-autofill/1.0"})
     with urllib.request.urlopen(req, timeout=20) as resp:
         return resp.read().decode("utf-8", errors="replace")
@@ -93,26 +216,27 @@ def fill_weather(tdir, lat, lng):
     if not days:
         days = periods[:2]
 
-    lines = []
+    period_lines = []
     for d in days:
         name = d.get("name", "?")
         temp = d.get("temperature")
         unit = d.get("temperatureUnit", "F")
         wind = d.get("windSpeed", "?")
         short = d.get("shortForecast", "?")
-        detail = d.get("detailedForecast", "")
-        feels = d.get("temperature")  # NWS doesn't give heat index directly
-        lines.append(f"{name}: {temp}°{unit} · {short} · wind {wind}")
-        if detail:
-            lines.append(f"  {detail}")
-    summary = " · ".join(lines[:2]) if lines else ""
-    details = "\n".join(lines)
+        period_lines.append(f"{name}: {temp}°{unit} · {short} · wind {wind}")
+    summary = " · ".join(period_lines)
+    details = "\n".join(
+        f"{d.get('name', '?')}: {d.get('temperature')}°{d.get('temperatureUnit', 'F')} · "
+        f"{d.get('shortForecast', '?')} · wind {d.get('windSpeed', '?')}"
+        for d in days
+    )
 
     weather = load_module(tdir, "weather.json")
     weather.setdefault("weather", {})
     weather["weather"]["summary"] = summary
     weather["weather"]["details"] = details
     weather["weather"]["forecastLink"] = forecast_url
+    weather["weather"]["sourceApiUrl"] = forecast_url
     weather["weather"]["updatedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     weather["weather"]["source"] = "National Weather Service (api.weather.gov)"
     path = write_module(tdir, "weather.json", weather)
@@ -155,7 +279,7 @@ def fill_rules(tdir, source):
     Extraction is best-effort: the human must review the result (it lands
     as draft content and the revision gate enforces approval)."""
     if source.startswith(("http://", "https://")):
-        text = fetch_text(source)
+        text = safe_fetch_text(source)  # SSRF-guarded
     elif os.path.isfile(source):
         with open(source, encoding="utf-8", errors="replace") as f:
             text = f.read()

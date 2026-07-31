@@ -17,7 +17,8 @@ Exit-code contract (all commands):
 
 import json
 import os
-
+import sys
+from datetime import datetime, timezone
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGETS_PATH = os.path.join(REPO_ROOT, "_targets.json")
 
@@ -136,9 +137,15 @@ def write_revision(tdir, workflow, digest, reviewer=None, manifest=None):
     rev["digest"] = digest
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if workflow == REVISION_APPROVED:
+        # Approving a (possibly new) digest: this content is not yet
+        # published, so a stale publishedAt from a previous revision must
+        # not survive — it would mislabel the current state.
+        rev["publishedAt"] = None
         rev["reviewer"] = reviewer or "admin"
         rev["approvedAt"] = now
     elif workflow == REVISION_PUBLISHED:
+        # Publication follows approval: keep approvedAt (when it was
+        # reviewed) and stamp when it actually reached parents.
         rev["publishedAt"] = now
     manifest["revision"] = rev
     with open(os.path.join(tdir, "manifest.json"), "w", encoding="utf-8") as f:
@@ -192,6 +199,27 @@ def check_publish_status(tdir, digest, allow_draft=False):
         f"changed after approval — re-approve (guide.py approve <org>/<slug>), "
         f"or use --allow-draft"
     )
+
+
+def approve_tournament(tdir, reviewer="admin"):
+    """Shared approve path (CLI + HTTP): compile, validate, then record
+    approval. Raises PlatformError on blocking validation — invalid
+    content can never be labeled 'approved'."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from compile import compile_bundle, content_digest, serialize
+    from validate import Report, run_checks
+    bundle, _, _ = compile_bundle(tdir)
+    output = serialize(bundle)
+    digest = content_digest(output)
+    report = Report()
+    run_checks(bundle, report, run_link_checks=False, tdir=tdir)
+    if report.blocking():
+        raise PlatformError(
+            "cannot approve — validation has blocking issues: "
+            + "; ".join(m for _, _, m in report.blocking()[:5]))
+    write_revision(tdir, REVISION_APPROVED, digest, reviewer=reviewer)
+    return {"tournament": os.path.basename(tdir), "digest": digest,
+            "workflow": REVISION_APPROVED, "reviewer": reviewer}
 
 
 def load_targets():

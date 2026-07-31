@@ -125,29 +125,18 @@ def cmd_preview(args):
 
 
 def cmd_approve(args):
-    """Approve the current content digest — required before publish."""
-    from compile import compile_bundle, content_digest, serialize
-    from pipeline import write_revision, REVISION_APPROVED
+    """Approve the current content digest — required before publish.
+    Shared with the admin server (validates first, never approves broken
+    content)."""
+    from pipeline import approve_tournament
 
     org, slug = parse_tournament_id(args.tournament)
     tdir = tournament_dir(org, slug)
     if not os.path.isdir(tdir):
         print(f"ERROR: no tournament dir at {tdir}", file=sys.stderr)
         return 2
-    bundle, used, unknown = compile_bundle(tdir)
-    output = serialize(bundle)
-    digest = content_digest(output)
-    # Validate before approving — never approve broken content
-    from validate import Report, run_checks
-    report = Report()
-    run_checks(bundle, report, run_link_checks=not args.no_links,
-               refresh_links=args.refresh_links, tdir=tdir)
-    if report.blocking():
-        print(report.render())
-        print("\nNOT APPROVED — fix blocking issues first.")
-        return 1
-    write_revision(tdir, REVISION_APPROVED, digest, reviewer=args.reviewer)
-    print(f"Approved {args.tournament} (digest {digest[:10]}, {len(used)} modules).")
+    result = approve_tournament(tdir, reviewer=args.reviewer)
+    print(f"Approved {args.tournament} (digest {result['digest'][:10]}).")
     print(f"  Status: set manifest status to 'live' if not already, then guide.py publish")
     return 0
 

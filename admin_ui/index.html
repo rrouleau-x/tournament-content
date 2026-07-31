@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tournament Admin</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --border: #e2e8f0; --text: #1a202c;
+    --muted: #64748b; --blue: #0055A4; --blue-dark: #003d78;
+    --green: #16a34a; --amber: #d97706; --red: #dc2626;
+    --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { background: var(--blue); color: #fff; padding: 14px 24px;
+           display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .sub { font-size: 12px; opacity: .85; margin-left: auto; }
+  .wrap { max-width: 1100px; margin: 24px auto; padding: 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; }
+  .grid { display: grid; gap: 16px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  h2 { font-size: 16px; margin-bottom: 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px;
+           font-size: 12px; font-weight: 600; }
+  .b-live { background: #dcfce7; color: #166534; }
+  .b-draft { background: #fef3c7; color: #92400e; }
+  .b-in_review { background: #dbeafe; color: #1e40af; }
+  .b-approved { background: #dcfce7; color: #166534; }
+  .b-published { background: #e2e8f0; color: #334155; }
+  .b-unknown { background: #fee2e2; color: #991b1b; }
+  button { font: inherit; border: none; border-radius: 8px; padding: 8px 16px;
+           cursor: pointer; font-weight: 600; font-size: 13px; }
+  .btn-blue { background: var(--blue); color: #fff; }
+  .btn-blue:hover { background: var(--blue-dark); }
+  .btn-ghost { background: #fff; border: 1px solid var(--border); color: var(--text); }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-amber { background: var(--amber); color: #fff; }
+  .btn-red { background: var(--red); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  tr:hover td { background: #f8fafc; }
+  textarea { width: 100%; min-height: 420px; font-family: "SF Mono", Menlo, monospace;
+             font-size: 12.5px; border: 1px solid var(--border); border-radius: 8px;
+             padding: 12px; line-height: 1.5; background: #fbfcfe; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tab { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
+         background: #fff; font-size: 13px; cursor: pointer; color: var(--muted); }
+  .tab.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .statusbar { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 16px;
+               border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+  .st-ok { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .st-warn { background: #fffbeb; border: 1px solid #fde68a; }
+  .st-fail { background: #fef2f2; border: 1px solid #fecaca; }
+  .kv { display: flex; gap: 6px; align-items: baseline; }
+  .kv b { font-weight: 600; }
+  .flash { position: fixed; bottom: 20px; right: 20px; padding: 12px 18px;
+           border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600;
+           opacity: 0; transition: opacity .25s; z-index: 50; }
+  .flash.show { opacity: 1; }
+  .flash.ok { background: var(--green); }
+  .flash.err { background: var(--red); }
+  .hidden { display: none !important; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  pre.report { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px;
+               font-size: 12.5px; font-family: "SF Mono", Menlo, monospace;
+               white-space: pre-wrap; max-height: 320px; overflow: auto; }
+  .saved { color: var(--green); font-size: 12px; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚽ Tournament Admin</h1>
+  <span class="sub">content pipeline · guide.py API</span>
+</header>
+
+<div class="wrap" id="view-list">
+  <div class="card">
+    <div class="row" style="margin-bottom:14px">
+      <h2 class="grow" style="margin:0">Tournaments</h2>
+      <button class="btn-blue" onclick="showNew()">+ New Tournament</button>
+    </div>
+    <table>
+      <thead><tr><th>Tournament</th><th>Status</th><th>Revision</th><th>Digest</th><th></th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="wrap hidden" id="view-new">
+  <div class="card" style="max-width:520px">
+    <h2>New Tournament</h2>
+    <div class="grid" style="gap:10px">
+      <input id="n-org" placeholder="org (e.g. savannah-united)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="n-slug" placeholder="slug (e.g. disney-showcase-2027)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="n-name" placeholder="display name (optional)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+    </div>
+    <div class="actions">
+      <button class="btn-blue" onclick="createTournament()">Create</button>
+      <button class="btn-ghost" onclick="showList()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="view-edit">
+  <div class="row" style="margin-bottom:14px">
+    <button class="btn-ghost" onclick="showList()">← All tournaments</button>
+    <h2 class="grow" id="e-title" style="margin:0"></h2>
+    <span id="e-status" class="badge"></span>
+  </div>
+  <div id="e-statusbar" class="statusbar"></div>
+  <div class="tabs" id="e-tabs"></div>
+  <div class="card">
+    <div class="row" style="margin-bottom:10px">
+      <span class="muted grow" id="e-module-desc"></span>
+      <span class="saved hidden" id="e-saved">✓ saved</span>
+    </div>
+    <textarea id="e-editor" spellcheck="false"></textarea>
+    <div class="actions">
+      <button class="btn-blue" onclick="saveModule()">Save Module</button>
+      <button class="btn-ghost" onclick="runValidate()">Validate</button>
+      <button class="btn-amber" onclick="runPreview()">Preview Publish</button>
+      <button class="btn-green" onclick="runApprove()">Approve Content</button>
+      <button class="btn-red" onclick="runPublish()">Publish</button>
+    </div>
+  </div>
+  <div class="card hidden" id="e-report-card" style="margin-top:16px">
+    <h2>Guide Health Report</h2>
+    <pre class="report" id="e-report"></pre>
+  </div>
+</div>
+
+<div class="flash" id="flash"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = { tournaments: [], current: null, modules: [], dirty: false };
+
+function flash(msg, ok = true) {
+  const f = $("flash");
+  f.textContent = msg;
+  f.className = "flash " + (ok ? "ok" : "err") + " show";
+  clearTimeout(f._t);
+  f._t = setTimeout(() => f.className = "flash", 2600);
+}
+
+async function api(method, url, body) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(url, opts);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok && !data.error) throw new Error("HTTP " + r.status);
+  return data;
+}
+
+function showList() {
+  $("view-list").classList.remove("hidden");
+  $("view-new").classList.add("hidden");
+  $("view-edit").classList.add("hidden");
+  loadList();
+}
+function showNew() {
+  $("view-list").classList.add("hidden");
+  $("view-new").classList.remove("hidden");
+  $("view-edit").classList.add("hidden");
+}
+async function showEdit(org, slug) {
+  $("view-list").classList.add("hidden");
+  $("view-new").classList.add("hidden");
+  $("view-edit").classList.remove("hidden");
+  $("e-report-card").classList.add("hidden");
+  const data = await api("GET", `/api/tournament/${org}/${slug}`);
+  state.current = data;
+  state.modules = data.modules || [];
+  $("e-title").textContent = `${data.manifest.name || org + "/" + slug}`;
+  renderStatus();
+  renderTabs();
+  selectModule(state.modules[0]);
+}
+
+function badge(status) {
+  const map = { live: "b-live", draft: "b-draft", in_review: "b-in_review",
+                approved: "b-approved", published: "b-published" };
+  return `<span class="badge ${map[status] || "b-unknown"}">${status || "?"}</span>`;
+}
+
+function renderStatus() {
+  const m = state.current.manifest;
+  const rev = m.revision || {};
+  const el = $("e-statusbar");
+  el.className = "statusbar st-ok";
+  el.innerHTML = `
+    <span class="kv"><b>status</b> ${badge(m.status)}</span>
+    <span class="kv"><b>revision</b> ${badge(rev.workflow || "none")}</span>
+    <span class="kv"><b>digest</b> <code>${(state.current.digest || "").slice(0, 10)}</code></span>
+    <span class="kv"><b>modules</b> ${state.modules.length}</span>
+    ${rev.reviewer ? `<span class="kv"><b>reviewer</b> ${rev.reviewer}</span>` : ""}
+    ${rev.approvedAt ? `<span class="kv"><b>approved</b> ${rev.approvedAt}</span>` : ""}
+    ${rev.publishedAt ? `<span class="kv"><b>published</b> ${rev.publishedAt}</span>` : ""}
+  `;
+}
+
+function renderTabs() {
+  const t = $("e-tabs");
+  t.innerHTML = "";
+  state.modules.forEach((m) => {
+    const b = document.createElement("button");
+    b.className = "tab";
+    b.textContent = m.replace(".json", "");
+    b.onclick = () => selectModule(m);
+    t.appendChild(b);
+  });
+}
+
+async function selectModule(name) {
+  if (state.dirty && !confirm("Unsaved changes — discard?")) return;
+  state.dirty = false;
+  $("e-saved").classList.add("hidden");
+  $("e-module-desc").textContent = `Module: ${name}`;
+  const r = await api("GET", `/api/tournament/${state.current.org}/${state.current.slug}`);
+  const bundle = r.bundle || {};
+  const key = Object.keys(bundle).find(k => {
+    // map module filename back to its bundle key (heuristic: same prefix)
+    return name.replace(".json", "").replace("venue-rules", "venueRules")
+               .replace("venue-rules", "venueRules") === k ||
+           name.replace(".json", "").startsWith(k);
+  });
+  let content = "";
+  if (key) content = JSON.stringify(bundle[key], null, 2);
+  else if (name === "manifest.json") content = JSON.stringify(r.manifest, null, 2);
+  $("e-editor").value = content || "{}";
+  $("e-editor").oninput = () => { state.dirty = true; $("e-saved").classList.add("hidden"); };
+  [...$("e-tabs").children].forEach(b => b.classList.toggle("active", b.textContent === name.replace(".json", "")));
+}
+
+async function saveModule() {
+  const name = currentModuleName();
+  let content = $("e-editor").value;
+  try { JSON.parse(content); } catch (e) {
+    flash("Invalid JSON: " + e.message, false); return;
+  }
+  await api("PUT", `/api/tournament/${state.current.org}/${state.current.slug}/module/${name}`,
+            { content });
+  state.dirty = false;
+  $("e-saved").classList.remove("hidden");
+  flash("Saved " + name);
+}
+
+function currentModuleName() {
+  const act = $("e-tabs").querySelector(".tab.active");
+  return (act ? act.textContent : state.modules[0]).replace(/\s+/g, "-") + ".json";
+}
+
+async function runValidate() {
+  if (state.dirty) { flash("Save the module first", false); return; }
+  const d = await api("POST", `/api/tournament/${state.current.org}/${state.current.slug}/validate`);
+  renderReport(d);
+  flash(`Validation: ${d.summary.blocking} blocking, ${d.summary.warnings} warnings`, d.summary.blocking === 0);
+}
+
+async function runPreview() {
+  const d = await api("POST", `/api/tournament/${state.current.org}/${state.current.slug}/preview`);
+  renderReport({ message: d.message, status: d.status, summary: { blocking: 0, warnings: 0 } });
+  flash(d.message, d.exit_code === 0);
+}
+
+async function runApprove() {
+  const d = await api("POST", `/api/tournament/${state.current.org}/${state.current.slug}/approve`);
+  flash(`Approved digest ${(d.digest || "").slice(0, 10)}`);
+  await showEdit(state.current.org, state.current.slug);
+}
+
+async function runPublish() {
+  if (!confirm("Publish to parents? This updates the live app data.")) return;
+  const d = await api("POST", `/api/tournament/${state.current.org}/${state.current.slug}/publish`);
+  if (d.status === "error") { flash(d.message, false); renderReport({ error: d.message }); return; }
+  flash(d.message, d.exit_code === 0);
+  renderReport({ status: d.status, message: d.message });
+  if (d.exit_code === 0) await showEdit(state.current.org, state.current.slug);
+}
+
+function renderReport(data) {
+  const card = $("e-report-card");
+  card.classList.remove("hidden");
+  const lines = [];
+  if (data.results) {
+    data.results.forEach(r => lines.push(`${r.severity === "ok" ? "✓" : r.severity === "warn" ? "⚠" : "✗"} [${r.check}] ${r.message}`));
+    lines.push(`── ${data.summary.passed} passed · ${data.summary.warnings} warnings · ${data.summary.blocking} blocking`);
+  } else {
+    lines.push(JSON.stringify(data, null, 2));
+  }
+  $("e-report").textContent = lines.join("\n");
+}
+
+async function createTournament() {
+  const org = $("n-org").value.trim(), slug = $("n-slug").value.trim();
+  if (!org || !slug) { flash("org and slug required", false); return; }
+  const d = await api("POST", "/api/tournaments/new", { org, slug, name: $("n-name").value.trim() });
+  if (d.error) { flash(d.error, false); return; }
+  flash("Created " + d.tournament + " (draft)");
+  showList();
+}
+
+async function loadList() {
+  const d = await api("GET", "/api/tournaments");
+  const tb = $("tbody");
+  tb.innerHTML = "";
+  (d.tournaments || []).forEach(t => {
+    const rev = t.revision || {};
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><b>${t.name || t.tournament}</b><br><span class="muted">${t.tournament}</span></td>
+      <td>${badge(t.status)}</td>
+      <td>${badge(rev.workflow || "none")}</td>
+      <td><code class="muted">${(rev.digest || "").slice(0, 10) || "—"}</code></td>
+      <td><button class="btn-ghost" onclick="showEdit('${t.org}','${t.slug}')">Edit</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+
+showList();
+</script>
+</body>
+</html>

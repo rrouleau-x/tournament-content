@@ -124,6 +124,34 @@ def cmd_preview(args):
     return 0
 
 
+def cmd_approve(args):
+    """Approve the current content digest — required before publish."""
+    from compile import compile_bundle, content_digest, serialize
+    from pipeline import write_revision, REVISION_APPROVED
+
+    org, slug = parse_tournament_id(args.tournament)
+    tdir = tournament_dir(org, slug)
+    if not os.path.isdir(tdir):
+        print(f"ERROR: no tournament dir at {tdir}", file=sys.stderr)
+        return 2
+    bundle, used, unknown = compile_bundle(tdir)
+    output = serialize(bundle)
+    digest = content_digest(output)
+    # Validate before approving — never approve broken content
+    from validate import Report, run_checks
+    report = Report()
+    run_checks(bundle, report, run_link_checks=not args.no_links,
+               refresh_links=args.refresh_links, tdir=tdir)
+    if report.blocking():
+        print(report.render())
+        print("\nNOT APPROVED — fix blocking issues first.")
+        return 1
+    write_revision(tdir, REVISION_APPROVED, digest, reviewer=args.reviewer)
+    print(f"Approved {args.tournament} (digest {digest[:10]}, {len(used)} modules).")
+    print(f"  Status: set manifest status to 'live' if not already, then guide.py publish")
+    return 0
+
+
 def cmd_publish(args):
     from deploy import deploy_tournament
     from validate import Report, run_checks
@@ -202,6 +230,13 @@ def main():
     p_pub.add_argument("--refresh-links", action="store_true")
     p_pub.add_argument("--allow-draft", action="store_true")
     p_pub.set_defaults(func=cmd_publish)
+
+    p_appr = sub.add_parser("approve", help="approve current content digest (required before publish)")
+    p_appr.add_argument("tournament", help="org/slug")
+    p_appr.add_argument("--no-links", action="store_true")
+    p_appr.add_argument("--refresh-links", action="store_true")
+    p_appr.add_argument("--reviewer", default="admin", help="who is approving (default: admin)")
+    p_appr.set_defaults(func=cmd_approve)
 
     p_list = sub.add_parser("list", help="list tournaments with status")
     p_list.set_defaults(func=cmd_list)

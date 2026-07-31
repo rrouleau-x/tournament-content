@@ -58,6 +58,17 @@ ASSET_FIELDS = [
 ]
 
 
+# Revision workflow states (manifest.revision.workflow).
+# draft → in_review → approved → published. Approval is tied to a specific
+# content digest: publishing requires the CURRENT content to be the one that
+# was human-approved.
+REVISION_DRAFT = "draft"
+REVISION_IN_REVIEW = "in_review"
+REVISION_APPROVED = "approved"
+REVISION_PUBLISHED = "published"
+REVISION_WORKFLOWS = (REVISION_DRAFT, REVISION_IN_REVIEW, REVISION_APPROVED, REVISION_PUBLISHED)
+
+
 class PlatformError(Exception):
     """Expected input/configuration failure → stable message + exit code."""
 
@@ -105,9 +116,44 @@ def load_manifest(tdir):
     return load_json(os.path.join(tdir, "manifest.json"), "manifest.json")
 
 
-def check_publish_status(tdir, allow_draft=False):
-    """Enforce the publish status gate. Returns (status, message).
-    live = explicit opt-in; anything else blocks unless --allow-draft."""
+def load_revision(tdir):
+    """Return the manifest revision object ({} if absent)."""
+    manifest = load_manifest(tdir)
+    rev = manifest.get("revision")
+    return rev if isinstance(rev, dict) else {}
+
+
+def write_revision(tdir, workflow, digest, reviewer=None, manifest=None):
+    """Write the manifest revision object. Returns the updated manifest.
+    workflow must be one of REVISION_WORKFLOWS."""
+    if workflow not in REVISION_WORKFLOWS:
+        raise PlatformError(f"invalid revision workflow '{workflow}' — expected "
+                            f"one of {', '.join(REVISION_WORKFLOWS)}")
+    from datetime import datetime, timezone
+    manifest = manifest if manifest is not None else load_manifest(tdir)
+    rev = dict(manifest.get("revision") or {})
+    rev["workflow"] = workflow
+    rev["digest"] = digest
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if workflow == REVISION_APPROVED:
+        rev["reviewer"] = reviewer or "admin"
+        rev["approvedAt"] = now
+    elif workflow == REVISION_PUBLISHED:
+        rev["publishedAt"] = now
+    manifest["revision"] = rev
+    with open(os.path.join(tdir, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return manifest
+
+
+def check_publish_status(tdir, digest, allow_draft=False):
+    """Enforce the publish gate: manifest REQUIRED, lifecycle status explicit,
+    and the current content digest must match the human-approved revision.
+
+    Returns (status, message). 'live' lifecycle + approved digest = publish
+    allowed. Missing manifest / missing status / missing revision / digest
+    mismatch / non-live status all block unless --allow-draft."""
     manifest = load_manifest(tdir)
     status = manifest.get("status")
     if not status:
@@ -115,13 +161,36 @@ def check_publish_status(tdir, allow_draft=False):
             "manifest.json has no 'status' field — set it explicitly "
             "(e.g. 'draft' while working, 'live' to publish)"
         )
-    if status == "live":
-        return status, "publish allowed"
+    rev = manifest.get("revision") or {}
+    workflow = rev.get("workflow")
+    approved_digest = rev.get("digest")
+
+    # Lifecycle gate first: only 'live' tournaments publish (unless --allow-draft)
+    if status != "live" and not allow_draft:
+        raise PlatformError(
+            f"manifest status is '{status}', not 'live' — set status to 'live' "
+            f"to publish, or use --allow-draft"
+        )
     if allow_draft:
-        return status, f"publish allowed via --allow-draft (status '{status}')"
+        return status, (f"publish allowed via --allow-draft (status '{status}', "
+                        f"revision '{workflow or 'none'}')")
+
+    # Then revision gate: current content must be the approved/published digest
+    if workflow == REVISION_PUBLISHED and approved_digest == digest:
+        return status, f"revision '{workflow}' matches current content (digest {digest[:10]})"
+    if workflow == REVISION_APPROVED and approved_digest == digest:
+        return status, f"revision '{workflow}' — current content approved (digest {digest[:10]})"
+    if workflow in (None, REVISION_DRAFT, REVISION_IN_REVIEW):
+        raise PlatformError(
+            f"revision workflow is '{workflow or 'none'}', not 'approved' — "
+            f"approve this content first (guide.py approve <org>/<slug>), "
+            f"or use --allow-draft"
+        )
     raise PlatformError(
-        f"manifest status is '{status}', not 'live' — set status to 'live' to "
-        f"publish, or use --allow-draft"
+        f"revision digest mismatch: current content {digest[:10]} ≠ approved "
+        f"{approved_digest[:10] if approved_digest else 'none'}. The content "
+        f"changed after approval — re-approve (guide.py approve <org>/<slug>), "
+        f"or use --allow-draft"
     )
 
 

@@ -11,5 +11,11 @@
     "end": "2026-08-23"
   },
   "compiledFrom": "data.json",
-  "createdAt": "2026-07-31T12:55:15Z"
+  "createdAt": "2026-07-31T12:55:15Z",
+  "revision": {
+    "workflow": "approved",
+    "digest": "29c417514b147bb7",
+    "reviewer": "admin",
+    "approvedAt": "2026-07-31T00:00:00Z"
+  }
 }

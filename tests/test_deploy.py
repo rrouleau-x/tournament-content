@@ -197,6 +197,53 @@ def test_draft_status_blocks(app_repo, valid_target, tmp_path):
     assert result.status == "published"
 
 
+def test_unapproved_change_blocks(app_repo, valid_target, tmp_path):
+    """Editing content after approval changes the digest — publish must
+    block until the new content is approved (digest-tied approval)."""
+    import shutil
+    from compile import compile_bundle, content_digest, serialize
+    tdir = tmp_path / "edited"
+    shutil.copytree(FIXTURE_DIR, tdir)
+    # Edit a module: rate change
+    with open(os.path.join(tdir, "hotels.json")) as f:
+        hotels = json.load(f)
+    hotels["hotels"]["official"][0]["rate"] = "$150/night"
+    with open(os.path.join(tdir, "hotels.json"), "w") as f:
+        json.dump(hotels, f, indent=2)
+        f.write("\n")
+
+    # Deploy without approving → blocked (digest mismatch vs published revision)
+    with pytest.raises(PlatformError, match="digest mismatch"):
+        deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target, tdir=str(tdir))
+
+    # Approve the new digest → publish succeeds
+    from pipeline import write_revision, REVISION_APPROVED
+    bundle, _, _ = compile_bundle(str(tdir))
+    digest = content_digest(serialize(bundle))
+    write_revision(str(tdir), REVISION_APPROVED, digest, reviewer="tester")
+    result = deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target, tdir=str(tdir))
+    assert result.status == "published"
+    remote = read_remote(app_repo["workdir"])
+    assert remote["hotels"]["official"][0]["rate"] == "$150/night"
+
+
+def test_missing_revision_blocks(app_repo, valid_target, tmp_path):
+    """A manifest with no revision object must block — can't publish content
+    that was never approved."""
+    import shutil
+    tdir = tmp_path / "norev"
+    shutil.copytree(FIXTURE_DIR, tdir)
+    with open(os.path.join(tdir, "manifest.json")) as f:
+        m = json.load(f)
+    del m["revision"]
+    with open(os.path.join(tdir, "manifest.json"), "w") as f:
+        json.dump(m, f, indent=2)
+        f.write("\n")
+
+    with pytest.raises(PlatformError, match="approve"):
+        deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target, tdir=str(tdir))
+
+
 def test_result_envelope_shape(app_repo, valid_target):
     result = deploy_tournament(FIXTURE_TOURNAMENT, targets=valid_target)
     d = result.to_dict()

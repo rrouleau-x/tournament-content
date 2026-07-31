@@ -156,8 +156,14 @@ def deploy_tournament(tournament, *, dry_run=False, run_link_checks=True,
             EXIT_BLOCKED, tournament, digest=digest, changed=False,
             blocking=summary["blocking"], warnings=summary["warnings"])
 
-    # 3. Status gate — manifest REQUIRED, status explicitly live
-    status_msg = check_publish_status(tdir, allow_draft=allow_draft)
+    # 3. Status gate — manifest REQUIRED, status explicitly live, and the
+    #    current content digest must match the human-approved revision.
+    #    (Skipped for dry-run: previews must show the diff even for
+    #    unapproved content — the gate only blocks actual publishing.)
+    if not dry_run:
+        status_msg = check_publish_status(tdir, digest, allow_draft=allow_draft)
+    else:
+        status_msg = "preview (dry-run — gate not enforced)"
 
     # 4. Verify target + worktree
     target = resolve_target(tournament, targets=targets)

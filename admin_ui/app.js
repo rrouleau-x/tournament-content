@@ -261,6 +261,66 @@ function delPath(obj, path) {
   }
 }
 
+// ── Form validation (client-side, per-field) ───────────────────────────
+// The server-side Guide Health Report stays the publish gate; this is
+// instant inline feedback so a club admin fixes fields as they type.
+
+function validateField(f, value) {
+  const empty = value === undefined || value === null || value === "";
+  if (f.required && empty) return "Required";
+  if (empty) return null;
+  if (f.type === "number" || f.type === "integer") {
+    const n = Number(value);
+    if (isNaN(n)) return "Must be a number";
+    if (f.minimum != null && n < f.minimum) return `Min ${f.minimum}`;
+    if (f.maximum != null && n > f.maximum) return `Max ${f.maximum}`;
+  }
+  if (f.widget === "select" && f.options && !f.options.includes(value))
+    return "Pick from the list";
+  if (f.widget === "url") {
+    try { const u = new URL(value); if (!/^https?:$/.test(u.protocol)) throw 0; }
+    catch (e) { return "Enter a full link (https://…)"; }
+  }
+  if (f.widget === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+    return "Enter a valid email";
+  if (f.widget === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    return "Use YYYY-MM-DD";
+  return null;
+}
+
+function validateAll(model, data) {
+  const errors = {};
+  function walk(fields) {
+    for (const f of fields) {
+      if (f.widget === "section") { walk(f.children || []); continue; }
+      if (f.widget === "coords") {
+        for (const c of f.children || []) {
+          const msg = validateField(c, getPath(data, c.path));
+          if (msg) errors[c.path] = msg;
+        }
+        continue;
+      }
+      if (f.widget === "repeater") {
+        const rows = getPath(data, f.path);
+        if (f.required && !Array.isArray(rows)) { errors[f.path] = "Add at least one"; continue; }
+        if (!Array.isArray(rows)) continue;
+        rows.forEach((_, i) => {
+          for (const c of f.children || []) {
+            const cf = Object.assign({}, c, { path: f.path + "[" + i + "]." + c.name });
+            const msg = validateField(cf, getPath(data, cf.path));
+            if (msg) errors[cf.path] = msg;
+          }
+        });
+        continue;
+      }
+      const msg = validateField(f, getPath(data, f.path));
+      if (msg) errors[f.path] = msg;
+    }
+  }
+  walk(model.fields);
+  return errors;
+}
+
 function renderForm(model, data) {
   const form = document.createElement("div");
   form.className = "form-panel";
@@ -300,6 +360,7 @@ function fieldInput(f, value) {
 function renderField(f, data, rowIndex) {
   const wrap = document.createElement("div");
   wrap.className = "field";
+  wrap.dataset.path = f.path;
   const value = getPath(data, f.path);
   const has = value !== undefined;
 
@@ -375,6 +436,8 @@ function renderField(f, data, rowIndex) {
   wrap.appendChild(label);
   if (f.help) { const h = document.createElement("p"); h.className = "muted"; h.textContent = f.help; wrap.appendChild(h); }
   const input = fieldInput(f, has ? value : "");
+  const errEl = document.createElement("span");
+  errEl.className = "field-err hidden";
   input.oninput = () => {
     let v = input.value;
     if (input.type === "checkbox") v = input.checked;
@@ -383,8 +446,13 @@ function renderField(f, data, rowIndex) {
     setPath(data, f.path, v);
     state.dirty = true;
     $("e-saved").classList.add("hidden");
+    const msg = validateField(f, v);
+    errEl.textContent = msg || "";
+    errEl.classList.toggle("hidden", !msg);
+    input.classList.toggle("invalid", !!msg);
   };
   wrap.appendChild(input);
+  wrap.appendChild(errEl);
   return wrap;
 }
 
@@ -394,6 +462,16 @@ async function saveModule() {
   if (state.formModel && state.showForm) {
     // Form view: serialize the edited object back to module JSON — the
     // SAME shape the raw editor produces, so the backend is untouched.
+    // Client-side validation first: fix fields before saving.
+    const errors = validateAll(state.formModel, state.parsed || {});
+    if (Object.keys(errors).length) {
+      const first = Object.keys(errors)[0];
+      flash("Form has errors — fix them first (" + first + ": " + errors[first] + ")", false);
+      renderModuleEditor();  // re-render to show error states
+      const el = document.querySelector('[data-path="' + CSS.escape(first) + '"]');
+      if (el) el.scrollIntoView({ block: "center" });
+      return;
+    }
     try {
       content = JSON.stringify(state.parsed || {}, null, 2);
     } catch (e) { flash("Form state invalid: " + e.message, false); return; }

@@ -67,3 +67,7 @@
                font-size: 12.5px; font-family: "SF Mono", Menlo, monospace;
                white-space: pre-wrap; max-height: 320px; overflow: auto; }
   .saved { color: var(--green); font-size: 12px; font-weight: 600; }
+
+/* ── Form validation ─────────────────────────────────────────────────── */
+.field-err { color: #d64545; font-size: 12px; }
+input.invalid, textarea.invalid, select.invalid { border-color: #d64545 !important; }

@@ -73,13 +73,24 @@ def tournament_path(org, slug):
 
 def get_tournament(org, slug):
     from compile import compile_bundle, content_digest, serialize
-    from pipeline import load_manifest
+    from pipeline import load_manifest, MODULE_REGISTRY
     tdir = tournament_path(org, slug)
     if not os.path.isdir(tdir):
         return None
     bundle, used, unknown = compile_bundle(tdir)
     output = serialize(bundle)
     manifest = load_manifest(tdir)
+    # Raw module file contents (source of truth for editing). The UI edits
+    # these files directly — saving writes them back verbatim.
+    module_files = {}
+    for filename, _keys, _req in MODULE_REGISTRY:
+        fpath = os.path.join(tdir, filename)
+        if os.path.isfile(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    module_files[filename] = f.read()
+            except OSError:
+                module_files[filename] = None
     return {
         "org": org,
         "slug": slug,
@@ -88,6 +99,7 @@ def get_tournament(org, slug):
         "modules": used,
         "unknownModules": unknown,
         "bundle": bundle,
+        "moduleFiles": module_files,
     }
 
 

@@ -229,16 +229,10 @@ async function selectModule(name) {
   $("e-saved").classList.add("hidden");
   $("e-module-desc").textContent = `Module: ${name}`;
   const r = await api("GET", `/api/tournament/${state.current.org}/${state.current.slug}`);
-  const bundle = r.bundle || {};
-  const key = Object.keys(bundle).find(k => {
-    // map module filename back to its bundle key (heuristic: same prefix)
-    return name.replace(".json", "").replace("venue-rules", "venueRules")
-               .replace("venue-rules", "venueRules") === k ||
-           name.replace(".json", "").startsWith(k);
-  });
-  let content = "";
-  if (key) content = JSON.stringify(bundle[key], null, 2);
-  else if (name === "manifest.json") content = JSON.stringify(r.manifest, null, 2);
+  // Edit the RAW module file (source of truth) — not the compiled bundle.
+  // manifest.json is edited via the manifest object.
+  let content = (r.moduleFiles && r.moduleFiles[name]) || "";
+  if (name === "manifest.json" && !content) content = JSON.stringify(r.manifest, null, 2);
   $("e-editor").value = content || "{}";
   $("e-editor").oninput = () => { state.dirty = true; $("e-saved").classList.add("hidden"); };
   [...$("e-tabs").children].forEach(b => b.classList.toggle("active", b.textContent === name.replace(".json", "")));

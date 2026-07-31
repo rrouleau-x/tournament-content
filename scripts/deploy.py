@@ -17,7 +17,7 @@ Transactional safety (per external design review):
   - every git return code is checked; local HEAD is verified == origin/main
     after push — a failed publish is never reported as success
 
-Exit codes (see platform.py contract):
+Exit codes (see pipeline.py contract):
   0 success/no-op · 1 validation blocked · 2 config/usage · 3 publish/git
   4 external dependency (network)
 

@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "Sporting Jax Boys Invitational",
+    "shortName": "Sporting Jax",
+    "organizer": "Sporting Jax Academy",
+    "dates": {
+      "start": "2026-08-22",
+      "end": "2026-08-23"
+    }
+  }
+}

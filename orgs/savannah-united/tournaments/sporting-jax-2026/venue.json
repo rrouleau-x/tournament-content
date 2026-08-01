@@ -1,0 +1,29 @@
+{
+  "venue": {
+    "name": "Veterans Park",
+    "address": "1332 Veterans Parkway, St. Johns, FL 32259",
+    "coordinates": {
+      "lat": 30.0821,
+      "lng": -81.5484
+    },
+    "mapsUrl": "https://www.google.com/maps/?q=1332+Veterans+Pkwy+St+Johns+FL+32259",
+    "parking": "Free main paved lot (Fields 1-4). Overflow grass lot at east end (Fields 5-6). No parking on grass near Fields 1-2. Arrive 30-45 min early.",
+    "fields": {
+      "count": 6,
+      "surface": "5 grass + 1 turf (all lighted)",
+      "map": "https://docs.google.com/presentation/d/e/2PACX-1vQCJyfhW8bCpxTk5HXfMKEEbekRHoaQ4FtYkLSzNfe8McocTmwMratx3skY7bvF2nmKkWDnPnknJXTs/pub",
+      "layoutNotes": {
+        "1_2": "Near main lot, west restrooms, concessions",
+        "3_4": "Near central pavilion, bathrooms, AED, team tent area",
+        "5_6": "Near east restrooms, overflow parking. Field 6 is turf."
+      }
+    },
+    "amenities": {
+      "concessions": true,
+      "restrooms": true,
+      "shade": "Limited — bring canopy",
+      "aed": true,
+      "playground": true
+    }
+  }
+}

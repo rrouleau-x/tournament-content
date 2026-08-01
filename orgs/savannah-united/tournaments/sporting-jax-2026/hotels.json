@@ -1,0 +1,68 @@
+{
+  "hotels": {
+    "stayToPlay": true,
+    "portal": "https://system.gotsport.com/stores/1903604Y4",
+    "official": [
+      {
+        "name": "Hampton Inn & Suites Bartram Park",
+        "chain": "Hilton",
+        "rate": "$143/night",
+        "total2Nights": "$286+",
+        "rooms": 10,
+        "drive": "7.9 mi · 15 min",
+        "route": "Bartram Park Blvd & Race Track Rd",
+        "amenities": [
+          "Free breakfast",
+          "Free parking",
+          "Outdoor pool",
+          "Pet-friendly",
+          "Free WiFi"
+        ],
+        "rating": 4.5,
+        "bestValue": true,
+        "bookUrl": "https://system.gotsport.com/stores/1903604Y4"
+      },
+      {
+        "name": "Fairfield Inn & Suites Butler Blvd",
+        "chain": "Marriott ★ Points",
+        "rate": "$139/night",
+        "rooms": 23,
+        "drive": "17.4 mi · 22 min",
+        "route": "I-95 S",
+        "amenities": [
+          "Outdoor pool",
+          "Whirlpool",
+          "Marriott Bonvoy"
+        ],
+        "bestValue": false
+      },
+      {
+        "name": "Aloft by Marriott Tapestry Park",
+        "chain": "Marriott ★ Points",
+        "rate": "$139/night",
+        "rooms": 34,
+        "drive": "18.8 mi · 25 min",
+        "route": "FL-9B S",
+        "amenities": [
+          "On-site bar & restaurant",
+          "Outdoor pool",
+          "Marriott Bonvoy"
+        ],
+        "bestValue": false
+      }
+    ],
+    "nonOfficial": [
+      {
+        "name": "HI Express Bartram Park",
+        "drive": "3.5 mi · 6 min",
+        "note": "Closest to venue. Not on GotSport portal."
+      },
+      {
+        "name": "Courtyard Flagler Center",
+        "chain": "Marriott ★ Points",
+        "drive": "8.6 mi · 12 min",
+        "note": "Marriott Bonvoy eligible. Not on GotSport."
+      }
+    ]
+  }
+}

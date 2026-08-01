@@ -808,12 +808,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlparse(self.path).path
         parts = path.split("/")
-        # DELETE /api/tournament/<org>/<slug> — destroy a tournament.
-        # Destructive and irreversible, so it requires the publish
-        # credential (X-Publish-Token) — the same capability that can
-        # reach parents. A draft/in_review tournament is safe to delete
-        # (never published); a LIVE tournament is REFUSED (parents are
-        # still being served from the app repo).
+        # DELETE /api/tournament/<org>/<slug> — destroy a tournament's
+        # SOURCE in the content repo. Destructive and irreversible, so it
+        # requires the publish credential (X-Publish-Token) — the same
+        # capability that can reach parents.
+        #
+        # Live tournaments ARE deletable, but only with explicit
+        # {"force": true} in the body: deleting a live source removes the
+        # content-repo tournament; the app repo is NEVER touched, so
+        # parents keep seeing the last published guide (the sacred-shell
+        # guarantee). Without force, a live delete is refused so scripts
+        # can't wipe a live source by accident.
         if len(parts) == 5 and parts[1] == "api" and parts[2] == "tournament":
             org, slug = unquote(parts[3]), unquote(parts[4])
             ok, authority = self._publish_authorized()
@@ -830,17 +835,23 @@ class Handler(BaseHTTPRequestHandler):
                 m = load_manifest(tdir)
                 status = m.get("status", "")
                 if status == "live":
-                    return self._send(*api_err(
-                        f"cannot delete '{org}/{slug}' — it is LIVE and parents "
-                        f"are still being served from the app repo. Set status "
-                        f"to 'draft' first if you truly want to remove it.", 400))
+                    force = bool((self._read_json() or {}).get("force"))
+                    if not force:
+                        return self._send(*api_err(
+                            f"'{org}/{slug}' is LIVE — parents are seeing the "
+                            f"published guide. Deleting removes the SOURCE only "
+                            f"(the app repo and parents' view stay untouched). "
+                            f"Send {{\"force\": true}} to confirm.", 400))
                 import shutil
                 shutil.rmtree(tdir)
                 _record_tournament_delete(org, slug)
                 audit(self._actor(), "tournament.delete", f"{org}/{slug}",
-                      detail=f"authority={authority}; status={status}")
+                      detail=f"authority={authority}; status={status}; "
+                             f"live={status == 'live'}")
                 return self._send(*api_ok({
-                    "deleted": f"{org}/{slug}", "status": "deleted"}))
+                    "deleted": f"{org}/{slug}", "status": "deleted",
+                    "note": "app repo untouched — parents keep the last "
+                            "published guide" if status == "live" else None}))
             except ValueError as e:
                 return self._send(*api_err(str(e), 400))
             except PlatformError as e:

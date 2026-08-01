@@ -974,20 +974,36 @@ def test_delete_draft_tournament(admin_env):
     assert f"{org}/{slug}" in log
 
 
-def test_delete_live_tournament_refused(admin_env):
-    """A LIVE tournament must be protected from deletion — parents are
-    still being served from the app repo."""
+def test_delete_live_tournament_requires_force(admin_env):
+    """A LIVE tournament's source is deletable ONLY with explicit
+    {"force": true} — without it the delete is refused so scripts can't
+    wipe a live source by accident."""
     token = admin_env["admin_token"]
     pt = admin_env["publish_token"]
     base = admin_env["base"]
     org, slug = "savannah-united", "sporting-jax-2026"
+    tdir = os.path.join(admin_env["content"], "orgs", org, "tournaments", slug)
 
+    # Without force → refused, source survives
     s, d = req("DELETE", f"{base}/api/tournament/{org}/{slug}", token=token,
                publish_token=pt)
     assert s == 400, d
-    assert "LIVE" in d["error"] or "live" in d["error"]
-    tdir = os.path.join(admin_env["content"], "orgs", org, "tournaments", slug)
-    assert os.path.isdir(tdir), "live tournament must survive"
+    assert "force" in d["error"]
+    assert os.path.isdir(tdir), "live source must survive a refused delete"
+
+    # With force → deleted, and the response explains the app repo stays
+    s, d = req("DELETE", f"{base}/api/tournament/{org}/{slug}", token=token,
+               publish_token=pt, body={"force": True})
+    assert s == 200, d
+    assert d["deleted"] == f"{org}/{slug}"
+    assert "app repo untouched" in d["note"]
+    assert not os.path.isdir(tdir), "live source must be gone after force delete"
+
+    # Audit records the live deletion
+    with open(os.path.join(admin_env["content"], "out", "audit.log")) as f:
+        log = f.read()
+    assert '"action": "tournament.delete"' in log
+    assert "live=True" in log
 
 
 def test_delete_tracked_draft_commits_tombstone(admin_env):

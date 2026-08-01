@@ -945,19 +945,30 @@ async function loadList() {
     btn.textContent = "Edit";
     btn.onclick = () => showEdit(t.org, t.slug);
     actCell.appendChild(btn);
-    if (t.status !== "live") {
-      // Deletion is irreversible and destroys the draft — require a
-      // confirm AND the publish token (same capability as publish).
+    {
+      // Deletion is irreversible and destroys the tournament SOURCE —
+      // require a confirm AND the publish token (same capability as
+      // publish). For LIVE tournaments the warning is stronger and the
+      // request carries force:true (the app repo and parents' view stay
+      // untouched — only the content-repo source is removed).
+      const isLive = t.status === "live";
       const del = document.createElement("button");
       del.className = "btn-ghost btn-sm btn-danger";
       del.textContent = "Delete";
       del.onclick = async () => {
-        if (!confirm("Delete tournament " + t.org + "/" + t.slug +
-                     "? This is IRREVERSIBLE — the draft is destroyed.")) return;
+        const warn = isLive
+          ? "This tournament is LIVE — parents are seeing the published guide.\n\n" +
+            "Deleting removes the SOURCE (tournament data) from the platform. " +
+            "The app repo and parents' view stay untouched — the last published " +
+            "guide keeps working.\n\nReally delete the source of " + t.org + "/" + t.slug + "?"
+          : "Delete tournament " + t.org + "/" + t.slug +
+            "? This is IRREVERSIBLE — the draft is destroyed.";
+        if (!confirm(warn)) return;
         const pt = prompt("Enter the PUBLISH token (deletion is irreversible):") || "";
-        const d = await api("DELETE", `/api/tournament/${t.org}/${t.slug}`, {}, pt);
+        const d = await api("DELETE", `/api/tournament/${t.org}/${t.slug}`,
+                            isLive ? { force: true } : {}, pt);
         if (d.error) { flash(d.error, false); return; }
-        flash("Deleted " + d.deleted);
+        flash("Deleted " + d.deleted + (d.note ? " — " + d.note : ""));
         loadList();
       };
       actCell.appendChild(del);

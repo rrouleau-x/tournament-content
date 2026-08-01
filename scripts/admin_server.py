@@ -1073,17 +1073,17 @@ def _record_tournament_delete(org, slug):
     try:
         from deploy import _content_repo_lock
         with _content_repo_lock():
-            rc, _, err = subprocess.run(
+            ra = subprocess.run(
                 ["git", "-C", REPO_ROOT, "add", "-A", "--", rel],
                 capture_output=True, text=True)
-            if rc != 0:
-                raise RuntimeError(f"git add failed: {err}")
-            rc, _, err = subprocess.run(
+            if ra.returncode != 0:
+                raise RuntimeError(f"git add failed: {ra.stderr.strip()}")
+            rc = subprocess.run(
                 ["git", "-C", REPO_ROOT, "commit", "-m",
                  f"tournament: delete {org}/{slug} (draft)",
                  "--", rel], capture_output=True, text=True)
-            if rc != 0 and "nothing to commit" not in err:
-                raise RuntimeError(f"git commit failed: {err}")
+            if rc.returncode != 0 and "nothing to commit" not in rc.stderr:
+                raise RuntimeError(f"git commit failed: {rc.stderr.strip()}")
     except Exception as e:  # noqa: BLE001 — bookkeeping is best-effort
         print(f"[admin] warning: could not record tournament deletion: {e}",
               file=sys.stderr)

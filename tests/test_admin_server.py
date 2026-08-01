@@ -988,3 +988,34 @@ def test_delete_live_tournament_refused(admin_env):
     assert "LIVE" in d["error"] or "live" in d["error"]
     tdir = os.path.join(admin_env["content"], "orgs", org, "tournaments", slug)
     assert os.path.isdir(tdir), "live tournament must survive"
+
+
+def test_delete_tracked_draft_commits_tombstone(admin_env):
+    """When a tracked (git-committed) draft is deleted, the deletion must
+    be committed to the content repo — git-as-database keeps the
+    tombstone. (Untracked scaffold drafts early-return; tracked drafts
+    exercise the commit path.)"""
+    token = admin_env["admin_token"]
+    pt = admin_env["publish_token"]
+    base = admin_env["base"]
+    org, slug = "tracked-org", "old-draft"
+    content = admin_env["content"]
+
+    s, d = req("POST", f"{base}/api/tournaments/new", token=token,
+               body={"org": org, "slug": slug, "name": "Old Draft"})
+    assert s == 201, d
+    _seed_git(admin_env)  # commit everything incl. the new draft
+    rel = os.path.join("orgs", org, "tournaments", slug)
+    before = git(content, "rev-parse", "HEAD")
+
+    s, d = req("DELETE", f"{base}/api/tournament/{org}/{slug}", token=token,
+               publish_token=pt)
+    assert s == 200, d
+
+    # The tombstone commit landed on top of the seed commit
+    after = git(content, "rev-parse", "HEAD")
+    assert after != before, "deletion must create a git commit"
+    last_msg = git(content, "log", "-1", "--format=%s")
+    assert "delete" in last_msg and slug in last_msg, last_msg
+    # The path no longer exists at HEAD (committed deletion)
+    assert git(content, "ls-files", "--", rel) == ""

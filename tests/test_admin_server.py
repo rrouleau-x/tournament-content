@@ -15,6 +15,7 @@ Starts a real ThreadingHTTPServer against temp repos and exercises:
 import json
 import os
 import shutil
+import subprocess
 import threading
 import time
 import urllib.error
@@ -73,7 +74,11 @@ def admin_env(tmp_path, monkeypatch):
     monkeypatch.setattr(admin_server, "_req_times", {})
     monkeypatch.setattr(admin_server, "_fail_counts", {})
 
-    # Rewrite _targets.json → temp app repo (isolate from real deploys)
+    # Rewrite _targets.json → temp app repo (isolate from real deploys).
+    # TARGETS_PATH is a module constant computed at pipeline import, so
+    # monkeypatching REPO_ROOT does NOT redirect it — without this patch
+    # resolve_target() reads the REAL _targets.json and test publishes
+    # would resolve the real workDir + mirror (silent isolation break).
     targets_path = os.path.join(scratch, "_targets.json")
     with open(targets_path) as f:
         targets = json.load(f)
@@ -85,6 +90,17 @@ def admin_env(tmp_path, monkeypatch):
     }
     with open(targets_path, "w") as f:
         json.dump(targets, f, indent=2)
+    monkeypatch.setattr(pipeline, "TARGETS_PATH", str(targets_path))
+
+    # Seed git in the scratch content repo: copytree strips .git, but
+    # _record_published / _record_tournament_delete need a real repo to
+    # commit bookkeeping (otherwise publishes degrade to warnings and
+    # the tombstone test has nothing to commit against).
+    git(str(scratch), "init", "-q")
+    git(str(scratch), "config", "user.email", "test@example.com")
+    git(str(scratch), "config", "user.name", "Test")
+    git(str(scratch), "add", "-A")
+    git(str(scratch), "commit", "-q", "-m", "fixture seed")
 
     # Tokens
     admin_server.ADMIN_TOKEN = "admin-test-token"
@@ -483,13 +499,18 @@ def test_publish_audit_records_authority(admin_env):
 
 def _seed_git(admin_env):
     """Init a git repo in the scratch content root + one commit so the
-    history/diff endpoints have real data. Returns the commit SHA."""
+    history/diff endpoints have real data. Tolerates an already-committed
+    tree (the admin_env fixture seeds git now, so this is a no-op when
+    nothing changed). Returns the commit SHA."""
     content = admin_env["content"]
     git(content, "init", "-q")
     git(content, "config", "user.email", "test@example.com")
     git(content, "config", "user.name", "Test")
     git(content, "add", "-A")
-    git(content, "commit", "-q", "-m", "seed")
+    r = subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=content,
+                       capture_output=True, text=True)
+    if r.returncode != 0 and "nothing to commit" not in r.stdout:
+        assert r.returncode == 0, f"git commit seed failed: {r.stderr}"
     return git(content, "rev-parse", "HEAD")
 
 
@@ -503,7 +524,7 @@ def test_history_endpoint(admin_env):
                token=token)
     assert s == 200, d
     assert d["count"] >= 1
-    assert d["history"][0]["message"] == "seed"
+    assert d["history"][0]["message"] in ("seed", "fixture seed")
     assert len(d["history"][0]["sha"]) == 40  # full SHA for diff round-trip
 
     # Module-scoped history

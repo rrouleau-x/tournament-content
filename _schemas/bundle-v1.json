@@ -125,6 +125,11 @@
       "properties": {
         "stayToPlay": { "type": "boolean" },
         "portal": { "type": "string", "format": "uri" },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the rates were last researched/verified (ET). Prices change daily — the app shows this so parents know to confirm on the portal."
+        },
         "official": {
           "type": "array",
           "description": "3-5 is guide guidance, not a contract limit — do not re-add maxItems here.",

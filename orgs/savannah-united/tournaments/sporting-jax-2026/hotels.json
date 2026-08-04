@@ -8,7 +8,7 @@
         "chain": "Hilton",
         "rate": "$143/night",
         "total2Nights": "$286+",
-        "rooms": 10,
+        "rooms": 2,
         "drive": "7.9 mi · 15 min",
         "route": "Bartram Park Blvd & Race Track Rd",
         "amenities": [
@@ -26,7 +26,7 @@
         "name": "Fairfield Inn & Suites Butler Blvd",
         "chain": "Marriott ★ Points",
         "rate": "$139/night",
-        "rooms": 10,
+        "rooms": 23,
         "drive": "17.4 mi · 22 min",
         "route": "I-95 S",
         "amenities": [
@@ -40,7 +40,7 @@
         "name": "Aloft by Marriott Tapestry Park",
         "chain": "Marriott ★ Points",
         "rate": "$139/night",
-        "rooms": 45,
+        "rooms": 34,
         "drive": "18.8 mi · 25 min",
         "route": "FL-9B S",
         "amenities": [
@@ -64,6 +64,6 @@
         "note": "Marriott Bonvoy eligible. Not on GotSport."
       }
     ],
-    "updatedAt": "2026-07-31T21:34:42-0400"
+    "updatedAt": "2026-08-04T08:05:00-0400"
   }
 }

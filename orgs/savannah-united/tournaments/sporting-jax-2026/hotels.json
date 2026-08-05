@@ -8,7 +8,7 @@
         "chain": "Hilton",
         "rate": "$143/night",
         "total2Nights": "$286+",
-        "rooms": 2,
+        "rooms": 1,
         "drive": "7.9 mi · 15 min",
         "route": "Bartram Park Blvd & Race Track Rd",
         "amenities": [
@@ -26,7 +26,7 @@
         "name": "Fairfield Inn & Suites Butler Blvd",
         "chain": "Marriott ★ Points",
         "rate": "$139/night",
-        "rooms": 34,
+        "rooms": 35,
         "drive": "17.4 mi · 22 min",
         "route": "I-95 S",
         "amenities": [
@@ -64,6 +64,6 @@
         "note": "Marriott Bonvoy eligible. Not on GotSport."
       }
     ],
-    "updatedAt": "2026-08-04T17:42:52-0400"
+    "updatedAt": "2026-08-05T16:48:56-0400"
   }
 }

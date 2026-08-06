@@ -1,0 +1,30 @@
+{
+  "hotels": {
+    "stayToPlay": false,
+    "official": [],
+    "nonOfficial": [
+      {
+        "name": "Hyatt Place Columbia / Harbison",
+        "chain": "Hyatt",
+        "rate": "~$142/night",
+        "drive": "Irmo area \u00b7 near SCUFC West",
+        "note": "TripAdvisor typical rate. Near SCUFC West complex."
+      },
+      {
+        "name": "Residence Inn Columbia NW / Harbison",
+        "chain": "Marriott \u2605 Points",
+        "rate": "~$120-160/night",
+        "drive": "944 Lake Murray Blvd, Irmo",
+        "note": "All-suite with kitchens. Marriott Bonvoy eligible."
+      },
+      {
+        "name": "Marriott Columbia Northwest / Harbison",
+        "chain": "Marriott \u2605 Points",
+        "rate": "from ~$116/night",
+        "drive": "Harbison area, Irmo",
+        "note": "Marriott Bonvoy eligible. Budget-friendly option."
+      }
+    ],
+    "updatedAt": "2026-08-05T20:30:00-0400"
+  }
+}

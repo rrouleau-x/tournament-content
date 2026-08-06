@@ -1,0 +1,39 @@
+{
+  "checklist": {
+    "player": [
+      "Both uniform kits",
+      "Cleats",
+      "Shin guards",
+      "Water bottle",
+      "Extra socks",
+      "Warm-up gear",
+      "Dry clothes",
+      "Recovery shoes",
+      "Medications"
+    ],
+    "weather": [
+      "Water (plenty)",
+      "Electrolytes",
+      "Sunscreen SPF 50+",
+      "Cooling towel",
+      "Rain gear",
+      "Plastic bags"
+    ],
+    "parent": [
+      "Folding chairs",
+      "Shade/canopy",
+      "Umbrella",
+      "Cooler",
+      "Snacks",
+      "Portable charger",
+      "Wipes",
+      "Sibling activities"
+    ],
+    "emergency": [
+      "First-aid kit",
+      "Ice packs",
+      "Insurance info",
+      "Emergency contacts"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "Carolina Cup",
+    "shortName": "Carolina Cup",
+    "organizer": "South Carolina United FC",
+    "dates": {
+      "start": "2026-10-02",
+      "end": "2026-10-04"
+    }
+  }
+}

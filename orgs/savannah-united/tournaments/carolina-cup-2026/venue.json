@@ -1,0 +1,19 @@
+{
+  "venue": {
+    "name": "SEFL Soccer Center (South Carolina United FC)",
+    "address": "115 Sunbelt Blvd, Columbia, SC 29203",
+    "mapsUrl": "https://www.google.com/maps/?q=115+Sunbelt+Blvd+Columbia+SC+29203",
+    "parking": "Plenty of free on-site parking (SCUFC official).",
+    "fields": {
+      "count": 1,
+      "surface": "Pending confirmation \u2014 2026 venue list releases ~Sep 16"
+    },
+    "amenities": {
+      "concessions": true,
+      "restrooms": true,
+      "shade": "Limited \u2014 bring canopy",
+      "aed": false,
+      "playground": false
+    }
+  }
+}

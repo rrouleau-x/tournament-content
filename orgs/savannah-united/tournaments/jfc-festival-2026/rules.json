@@ -1,0 +1,24 @@
+{
+  "rules": {
+    "fullLink": "https://jfcsoccer.com/",
+    "keyRules": [
+      {
+        "label": "Format",
+        "value": "1-day festival \u2014 expect ~2 games per team"
+      },
+      {
+        "label": "Pets",
+        "value": "NO dogs allowed at all JFC parks & facilities"
+      },
+      {
+        "label": "Parking",
+        "value": "Free on-site lots \u2014 DO NOT park on the side of the road"
+      },
+      {
+        "label": "Medical",
+        "value": "Certified athletic trainers on-site 60 min before first game"
+      }
+    ],
+    "tiebreakers": []
+  }
+}

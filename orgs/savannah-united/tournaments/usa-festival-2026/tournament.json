@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "United Soccer Alliance Festival",
+    "shortName": "USA Festival",
+    "organizer": "United Soccer Alliance",
+    "dates": {
+      "start": "2026-10-24",
+      "end": "2026-10-24"
+    }
+  }
+}

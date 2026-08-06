@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "Jacksonville FC Festival",
+    "shortName": "JFC Festival",
+    "organizer": "Jacksonville FC",
+    "dates": {
+      "start": "2026-11-07",
+      "end": "2026-11-07"
+    }
+  }
+}

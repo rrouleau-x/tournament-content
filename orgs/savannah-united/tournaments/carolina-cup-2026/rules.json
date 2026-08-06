@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "fullLink": "https://soccer.sincsports.com/TTIntro.aspx?tid=CARCUP",
+    "keyRules": [
+      {
+        "label": "Format",
+        "value": "U9 = 7v7 \u00b7 U9 entry $725"
+      },
+      {
+        "label": "Check-in",
+        "value": "Online only \u2014 no onsite check-in"
+      },
+      {
+        "label": "Weather",
+        "value": "Thorguard lightning system at SEFL/SCUFC West/Polo \u2014 1 horn = shelter, 3 blasts = clear"
+      }
+    ],
+    "tiebreakers": []
+  }
+}

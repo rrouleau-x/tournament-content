@@ -1,0 +1,30 @@
+{
+  "hotels": {
+    "stayToPlay": false,
+    "official": [],
+    "nonOfficial": [
+      {
+        "name": "Best Western Inn & Suites of Macon",
+        "chain": "Best Western",
+        "rate": "~$67-83/night",
+        "drive": "4681 Chambers Rd \u00b7 near I-475",
+        "note": "Club-listed option near the complex."
+      },
+      {
+        "name": "La Quinta Inn & Suites by Wyndham Macon West",
+        "chain": "Wyndham",
+        "rate": "~$93-158/night",
+        "drive": "4615 Chambers Rd \u00b7 near I-475",
+        "note": "Club-listed option near the complex."
+      },
+      {
+        "name": "Hampton Inn & Suites Macon I-475",
+        "chain": "Hilton",
+        "rate": "~$115-165/night",
+        "drive": "5010 Eisenhower Pkwy",
+        "note": "Free hot breakfast. Hilton Honors eligible."
+      }
+    ],
+    "updatedAt": "2026-08-05T20:30:00-0400"
+  }
+}

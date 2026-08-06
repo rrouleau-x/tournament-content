@@ -1,0 +1,19 @@
+{
+  "venue": {
+    "name": "Patton Park",
+    "address": "2850 Hodges Blvd, Jacksonville, FL 32224",
+    "mapsUrl": "https://www.google.com/maps/place/Patton+Park/@30.2973509,-81.4679888,17z/",
+    "parking": "Free on-site lots. DO NOT park on the side of the road (JFC rule).",
+    "fields": {
+      "count": 1,
+      "surface": "Lighted fields (exact count pending confirmation)"
+    },
+    "amenities": {
+      "concessions": false,
+      "restrooms": true,
+      "shade": "Limited — bring canopy",
+      "aed": false,
+      "playground": false
+    }
+  }
+}

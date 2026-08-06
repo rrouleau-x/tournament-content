@@ -1,0 +1,22 @@
+{
+  "org": "savannah-united",
+  "slug": "usa-festival-2026",
+  "schemaVersion": 1,
+  "status": "draft",
+  "sport": "soccer",
+  "name": "United Soccer Alliance Festival 2026",
+  "shortName": "USA Festival",
+  "dates": {
+    "start": "2026-10-24",
+    "end": "2026-10-24"
+  },
+  "compiledFrom": "data.json",
+  "createdAt": "2026-08-05T21:00:00Z",
+  "revision": {
+    "workflow": "draft",
+    "digest": null,
+    "reviewer": null,
+    "approvedAt": null,
+    "publishedAt": null
+  }
+}

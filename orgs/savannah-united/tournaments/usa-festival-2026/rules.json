@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "fullLink": "https://unitedsocceralliance.org/",
+    "keyRules": [
+      {
+        "label": "Format",
+        "value": "1-day festival \u2014 expect ~2 games per team"
+      },
+      {
+        "label": "Hours",
+        "value": "Venue game hours roughly 8 AM - 5 PM"
+      },
+      {
+        "label": "Pets",
+        "value": "NO pets allowed at Eagle Harbor Soccer Complex"
+      }
+    ],
+    "tiebreakers": []
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "nearby": {
+    "urgentCare": {
+      "name": "Baptist Medical Center — Town Center ER",
+      "address": "4085 Town Center Pkwy, Jacksonville, FL 32246",
+      "drive": "~10 min",
+      "maps": "https://www.google.com/maps/?q=Baptist+Medical+Center+Town+Center+Jacksonville"
+    },
+    "target": {
+      "name": "Target — Hodges / Town Center",
+      "address": "4701 Town Center Pkwy, Jacksonville, FL 32246",
+      "drive": "~8 min",
+      "maps": "https://www.google.com/maps/?q=Target+Town+Center+Jacksonville"
+    },
+    "dicks": {
+      "name": "Dick's Sporting Goods — St. Johns Town Center",
+      "address": "10390 Midtown Pkwy, Jacksonville, FL 32246",
+      "drive": "~10 min",
+      "maps": "https://www.google.com/maps/?q=Dicks+Sporting+Goods+St+Johns+Town+Center"
+    },
+    "coffee": {
+      "name": "Starbucks — Beach Blvd",
+      "address": "13931 Beach Blvd, Jacksonville, FL 32224",
+      "drive": "~4 min",
+      "maps": "https://www.google.com/maps/?q=Starbucks+Beach+Blvd+Jacksonville"
+    }
+  }
+}

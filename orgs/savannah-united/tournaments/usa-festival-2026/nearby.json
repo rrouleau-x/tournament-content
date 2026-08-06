@@ -1,0 +1,28 @@
+{
+  "nearby": {
+    "urgentCare": {
+      "name": "Baptist Wolfson Children's Emergency Center",
+      "address": "1771 Baptist Clay Dr, Fleming Island, FL 32003",
+      "drive": "~5 min",
+      "maps": "https://www.google.com/maps/?q=Baptist+Wolfson+Emergency+Fleming+Island"
+    },
+    "target": {
+      "name": "Target \u2014 Fleming Island",
+      "address": "1820 Town Center Blvd, Fleming Island, FL 32003",
+      "drive": "~6 min",
+      "maps": "https://www.google.com/maps/?q=Target+Fleming+Island"
+    },
+    "dicks": {
+      "name": "Dick's Sporting Goods \u2014 Fleming Island",
+      "address": "Town Center Blvd, Fleming Island, FL 32003",
+      "drive": "~6 min",
+      "maps": "https://www.google.com/maps/?q=Dicks+Fleming+Island"
+    },
+    "coffee": {
+      "name": "Starbucks \u2014 Town Center Blvd",
+      "address": "Town Center Blvd, Fleming Island, FL 32003",
+      "drive": "~6 min",
+      "maps": "https://www.google.com/maps/?q=Starbucks+Fleming+Island"
+    }
+  }
+}

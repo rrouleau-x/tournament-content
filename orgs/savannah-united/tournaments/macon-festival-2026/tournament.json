@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "Macon Soccer Club Festival",
+    "shortName": "Macon Festival",
+    "organizer": "Macon Soccer Club",
+    "dates": {
+      "start": "2026-10-17",
+      "end": "2026-10-17"
+    }
+  }
+}

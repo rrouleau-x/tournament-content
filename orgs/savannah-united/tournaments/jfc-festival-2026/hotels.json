@@ -1,0 +1,30 @@
+{
+  "hotels": {
+    "stayToPlay": false,
+    "official": [],
+    "nonOfficial": [
+      {
+        "name": "Hampton Inn & Suites Jacksonville — Beach Blvd / Mayo Clinic",
+        "chain": "Hilton",
+        "rate": "~$130-151/night",
+        "drive": "1.3 mi · ~4 min",
+        "note": "Free hot breakfast, indoor pool, free parking. Not pet-friendly."
+      },
+      {
+        "name": "TownePlace Suites by Marriott Mayo Clinic Jacksonville (East)",
+        "chain": "Marriott ★ Points",
+        "rate": "~$131-154/night",
+        "drive": "1.3 mi · ~4 min",
+        "note": "All suites with full kitchens, free breakfast, free parking. Pets OK ($50/stay)."
+      },
+      {
+        "name": "Courtyard by Marriott Jacksonville at Mayo Clinic / Beaches",
+        "chain": "Marriott ★ Points",
+        "rate": "~$159-263/night",
+        "drive": "2.6 mi · ~7 min",
+        "note": "Restaurant/lounge, free parking. Not pet-friendly."
+      }
+    ],
+    "updatedAt": "2026-08-05T20:15:00-0400"
+  }
+}

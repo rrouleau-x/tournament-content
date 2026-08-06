@@ -1,0 +1,19 @@
+{
+  "venue": {
+    "name": "Eagle Harbor Soccer Complex",
+    "address": "4387 Lakeshore Dr, Fleming Island, FL 32003",
+    "mapsUrl": "https://www.google.com/maps/?q=4387+Lakeshore+Dr+Fleming+Island+FL+32003",
+    "parking": "Extensive free on-site parking at the front of the complex.",
+    "fields": {
+      "count": 1,
+      "surface": "Pending confirmation \u2014 county field map available"
+    },
+    "amenities": {
+      "concessions": true,
+      "restrooms": true,
+      "shade": "Covered pavilion available",
+      "aed": false,
+      "playground": true
+    }
+  }
+}

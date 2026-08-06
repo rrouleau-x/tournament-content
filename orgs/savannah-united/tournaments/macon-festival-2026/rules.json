@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "fullLink": "https://www.maconsoccerclub.com/",
+    "keyRules": [
+      {
+        "label": "Format",
+        "value": "1-day festival \u2014 expect ~2 games per team"
+      },
+      {
+        "label": "Arrival",
+        "value": "Arrive at least 30 min before first game (club guidance)"
+      },
+      {
+        "label": "Heat",
+        "value": "Georgia Soccer WBGT heat policy applies"
+      }
+    ],
+    "tiebreakers": []
+  }
+}

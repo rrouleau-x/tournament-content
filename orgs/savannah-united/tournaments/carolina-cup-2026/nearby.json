@@ -1,0 +1,28 @@
+{
+  "nearby": {
+    "urgentCare": {
+      "name": "Prisma Health Richland Hospital ER",
+      "address": "5 Richland Medical Park Dr, Columbia, SC 29203",
+      "drive": "~15 min from SEFL",
+      "maps": "https://www.google.com/maps/?q=Prisma+Health+Richland+ER+Columbia+SC"
+    },
+    "target": {
+      "name": "Target \u2014 Harbison",
+      "address": "168 Harbison Blvd, Columbia, SC 29212",
+      "drive": "~15 min from Irmo complexes",
+      "maps": "https://www.google.com/maps/?q=Target+Harbison+Columbia+SC"
+    },
+    "dicks": {
+      "name": "Dick's Sporting Goods \u2014 Harbison",
+      "address": "215 Harbison Blvd, Columbia, SC 29212",
+      "drive": "~15 min",
+      "maps": "https://www.google.com/maps/?q=Dicks+Harbison+Columbia+SC"
+    },
+    "coffee": {
+      "name": "Starbucks \u2014 Harbison Blvd",
+      "address": "241 Harbison Blvd, Columbia, SC 29212",
+      "drive": "~15 min",
+      "maps": "https://www.google.com/maps/?q=Starbucks+Harbison+Columbia+SC"
+    }
+  }
+}

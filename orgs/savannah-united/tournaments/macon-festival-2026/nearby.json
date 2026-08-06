@@ -1,0 +1,28 @@
+{
+  "nearby": {
+    "urgentCare": {
+      "name": "Atrium Health Navicent ER",
+      "address": "777 Hemlock St, Macon, GA 31201",
+      "drive": "~12 min",
+      "maps": "https://www.google.com/maps/?q=Atrium+Health+Navicent+Macon"
+    },
+    "target": {
+      "name": "Target \u2014 Eisenhower Crossing",
+      "address": "Eisenhower Pkwy, Macon, GA 31206",
+      "drive": "~2 min",
+      "maps": "https://www.google.com/maps/?q=Target+Eisenhower+Crossing+Macon"
+    },
+    "dicks": {
+      "name": "Dick's Sporting Goods \u2014 Eisenhower Crossing",
+      "address": "Eisenhower Pkwy, Macon, GA 31206",
+      "drive": "~2 min",
+      "maps": "https://www.google.com/maps/?q=Dicks+Eisenhower+Crossing+Macon"
+    },
+    "coffee": {
+      "name": "Starbucks \u2014 Eisenhower Pkwy",
+      "address": "Eisenhower Pkwy, Macon, GA 31206",
+      "drive": "~2 min",
+      "maps": "https://www.google.com/maps/?q=Starbucks+Eisenhower+Macon"
+    }
+  }
+}

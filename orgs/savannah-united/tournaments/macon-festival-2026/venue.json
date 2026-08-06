@@ -1,0 +1,19 @@
+{
+  "venue": {
+    "name": "Macon Soccer Club (Macon Soccer Complex)",
+    "address": "4510 Raley Rd, Macon, GA 31206",
+    "mapsUrl": "https://www.google.com/maps/?q=4510+Raley+Rd+Macon+GA+31206",
+    "parking": "Free on-site lot at the complex.",
+    "fields": {
+      "count": 1,
+      "surface": "Pending confirmation \u2014 field map published at events"
+    },
+    "amenities": {
+      "concessions": false,
+      "restrooms": false,
+      "shade": "Limited \u2014 bring canopy",
+      "aed": false,
+      "playground": false
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "org": "savannah-united",
+  "slug": "carolina-cup-2026",
+  "schemaVersion": 1,
+  "status": "draft",
+  "sport": "soccer",
+  "name": "Carolina Cup 2026",
+  "shortName": "Carolina Cup",
+  "dates": {
+    "start": "2026-10-02",
+    "end": "2026-10-04"
+  },
+  "compiledFrom": "data.json",
+  "createdAt": "2026-08-05T21:00:00Z",
+  "revision": {
+    "workflow": "draft",
+    "digest": null,
+    "reviewer": null,
+    "approvedAt": null,
+    "publishedAt": null
+  }
+}

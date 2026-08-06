@@ -4,27 +4,27 @@
     "official": [],
     "nonOfficial": [
       {
-        "name": "Hampton Inn & Suites Jacksonville — Beach Blvd / Mayo Clinic",
+        "name": "Hampton Inn & Suites Jacksonville \u2014 Beach Blvd / Mayo Clinic",
         "chain": "Hilton",
         "rate": "~$130-151/night",
-        "drive": "1.3 mi · ~4 min",
-        "note": "Free hot breakfast, indoor pool, free parking. Not pet-friendly."
+        "drive": "1.2 mi \u00b7 4 min",
+        "note": "via Hodges Blvd. 13733 Beach Blvd. Free hot breakfast, indoor pool. Not pet-friendly."
       },
       {
-        "name": "TownePlace Suites by Marriott Mayo Clinic Jacksonville (East)",
-        "chain": "Marriott ★ Points",
+        "name": "TownePlace Suites by Marriott Mayo Clinic (East)",
+        "chain": "Marriott \u2605 Points",
         "rate": "~$131-154/night",
-        "drive": "1.3 mi · ~4 min",
-        "note": "All suites with full kitchens, free breakfast, free parking. Pets OK ($50/stay)."
+        "drive": "1.2 mi \u00b7 4 min",
+        "note": "via Hodges Blvd. 13741 Beach Blvd. All-suite with kitchens. Pets OK ($50/stay). Marriott Bonvoy eligible."
       },
       {
         "name": "Courtyard by Marriott Jacksonville at Mayo Clinic / Beaches",
-        "chain": "Marriott ★ Points",
+        "chain": "Marriott \u2605 Points",
         "rate": "~$159-263/night",
-        "drive": "2.6 mi · ~7 min",
-        "note": "Restaurant/lounge, free parking. Not pet-friendly."
+        "drive": "4.7 mi \u00b7 13 min",
+        "note": "via San Pablo Pkwy & US-90 W. 14390 Mayo Blvd. Restaurant/lounge. Not pet-friendly. Marriott Bonvoy eligible."
       }
     ],
-    "updatedAt": "2026-08-05T20:15:00-0400"
+    "updatedAt": "2026-08-05T21:00:00-0400"
   }
 }

@@ -7,24 +7,24 @@
         "name": "Holiday Inn Express & Suites Fleming Island",
         "chain": "IHG",
         "rate": "from ~$148/night",
-        "drive": "2.8 mi \u00b7 ~6 min",
-        "note": "Closest option. Free breakfast, indoor pool. USA's own recommended list."
+        "drive": "2.4 mi \u00b7 8 min",
+        "note": "via East-West Pkwy & Lakeshore Dr. 1815 East-West Pkwy. Free breakfast, indoor pool. Closest option."
       },
       {
         "name": "Fairfield Inn by Marriott Jacksonville \u2014 Orange Park",
         "chain": "Marriott \u2605 Points",
         "rate": "from ~$96/night",
-        "drive": "8 mi \u00b7 ~15 min",
-        "note": "Budget pick. Marriott Bonvoy eligible."
+        "drive": "7.9 mi \u00b7 14 min",
+        "note": "via US-17 S. 450 Eldridge Ave, Orange Park. Budget pick. Marriott Bonvoy eligible."
       },
       {
         "name": "Holiday Inn Hotel & Suites Orange Park",
         "chain": "IHG",
         "rate": "from ~$156/night",
-        "drive": "8.2 mi \u00b7 ~15 min",
-        "note": "Full-service option near Orange Park."
+        "drive": "8.0 mi \u00b7 14 min",
+        "note": "via US-17 S. 620 Wells Rd, Orange Park. Full-service option."
       }
     ],
-    "updatedAt": "2026-08-05T20:30:00-0400"
+    "updatedAt": "2026-08-05T21:00:00-0400"
   }
 }

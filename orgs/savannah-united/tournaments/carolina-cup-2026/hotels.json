@@ -7,24 +7,24 @@
         "name": "Hyatt Place Columbia / Harbison",
         "chain": "Hyatt",
         "rate": "~$142/night",
-        "drive": "Irmo area \u00b7 near SCUFC West",
-        "note": "TripAdvisor typical rate. Near SCUFC West complex."
+        "drive": "11.2 mi \u00b7 14 min",
+        "note": "via I-26 E & I-20 E. Irmo area \u2014 near SCUFC West. Typical TripAdvisor rate."
       },
       {
         "name": "Residence Inn Columbia NW / Harbison",
         "chain": "Marriott \u2605 Points",
         "rate": "~$120-160/night",
-        "drive": "944 Lake Murray Blvd, Irmo",
-        "note": "All-suite with kitchens. Marriott Bonvoy eligible."
+        "drive": "11.4 mi \u00b7 16 min",
+        "note": "via I-26 E & I-20 E. 944 Lake Murray Blvd, Irmo. All-suite with kitchens. Marriott Bonvoy eligible."
       },
       {
         "name": "Marriott Columbia Northwest / Harbison",
         "chain": "Marriott \u2605 Points",
         "rate": "from ~$116/night",
-        "drive": "Harbison area, Irmo",
-        "note": "Marriott Bonvoy eligible. Budget-friendly option."
+        "drive": "10.3 mi \u00b7 16 min",
+        "note": "via I-26 E & I-20 E. Harbison area. Marriott Bonvoy eligible. Budget-friendly option."
       }
     ],
-    "updatedAt": "2026-08-05T20:30:00-0400"
+    "updatedAt": "2026-08-05T21:00:00-0400"
   }
 }

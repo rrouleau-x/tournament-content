@@ -14,9 +14,9 @@
   "createdAt": "2026-07-31T12:55:15Z",
   "revision": {
     "workflow": "published",
-    "digest": "55e6c45d667e8a66",
-    "reviewer": "admin",
-    "approvedAt": "2026-08-05T20:50:24Z",
-    "publishedAt": "2026-08-05T20:50:26Z"
+    "digest": "42097575130a33dd",
+    "reviewer": "cron-hotel-refresh",
+    "approvedAt": "2026-08-07T13:23:03Z",
+    "publishedAt": "2026-08-07T13:23:08Z"
   }
 }

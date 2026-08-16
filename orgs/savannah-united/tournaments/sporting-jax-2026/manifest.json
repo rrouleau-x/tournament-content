@@ -14,9 +14,11 @@
   "createdAt": "2026-07-31T12:55:15Z",
   "revision": {
     "workflow": "published",
-    "digest": "37bf379134954823",
+    "digest": "e68f68ecaa9f9b84",
     "reviewer": "admin",
-    "approvedAt": "2026-08-13T12:03:55Z",
-    "publishedAt": "2026-08-13T12:03:59Z"
+    "approvedAt": "2026-08-16T12:08:43Z",
+    "publishedAt": "2026-08-16T12:08:55Z",
+    "version": "v5.0",
+    "updated": "2026-08-15T07:54:14-0400"
   }
 }

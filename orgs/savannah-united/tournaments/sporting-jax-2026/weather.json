@@ -1,7 +1,10 @@
 {
   "weather": {
-    "summary": "Upper 90s · Heat index 105-114°F · Afternoon t-storms (40-60%)",
-    "details": "Typical late-August Florida weather. Morning games significantly cooler. Hydrate beginning Friday. Bring cooling towels, shade, sunscreen.",
-    "forecastLink": ""
+    "summary": "Updated Aug 18: Sunday rain chance jumped to 88% (up from 59%) with thunderstorms. Saturday 56%, Friday travel day 58%. Both game days need rain gear. Extreme heat through the week — Saturday RealFeel 107F, Sunday 102F, Friday travel 108F. Trend: Aug 10 (4%/6%), Aug 15 (55%/3%), Aug 16 (56%/59%), Aug 18 (56%/88%). Recheck morning of each game.",
+    "details": "Fri Aug 21 (travel): High 94F, Low 76F, RealFeel 108F, humid with an afternoon thunderstorm, 58% rain (AccuWeather), UV 7, SSW 8 mph, ~1 hr rain. Sat Aug 22: High 95F, Low 77F, RealFeel 107F, humid with a thunderstorm in the afternoon, 56% rain, UV 9, SW 9 mph, ~1 hr rain. Sun Aug 23: High 93F, Low 76F, RealFeel 102F, mostly cloudy with a couple of thunderstorms, 88% rain (up from 59%), UV 4, SW 9 mph, ~3 hrs rain. Sources: AccuWeather 32223 + NWS Jacksonville (extreme heat warning active). Rain gear essential both game days.",
+    "forecastLink": "https://www.accuweather.com/en/us/jacksonville/32223/10-day-weather-forecast/13855_pc",
+    "source": "AccuWeather (32223) + NWS Jacksonville",
+    "sourceApiUrl": "https://forecast.weather.gov/MapClick.php?lat=30.1544&lon=-81.6328",
+    "updatedAt": "2026-08-18T07:30:00-04:00"
   }
 }

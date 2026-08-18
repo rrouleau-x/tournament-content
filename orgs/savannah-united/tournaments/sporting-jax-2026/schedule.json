@@ -1,5 +1,97 @@
 {
-  "games": [],
-  "scheduleStatus": "pending",
-  "scheduleExpected": "August 8-15 via GotSport"
+  "games": [
+    {
+      "id": "28",
+      "date": "2026-08-22",
+      "time": "10:30 AM EDT",
+      "opponent": "PC NFPL B2017/18 Dev 1",
+      "venue": "Chuck Rogers Park",
+      "field": "Field 7",
+      "arrival": "9:45 AM",
+      "uniform": "Pack both kits",
+      "status": "scheduled",
+      "type": "group"
+    },
+    {
+      "id": "30",
+      "date": "2026-08-22",
+      "time": "3:30 PM EDT",
+      "opponent": "JAX NFPL B2017/18 N1 DEV 1",
+      "venue": "Chuck Rogers Park",
+      "field": "Field 6",
+      "arrival": "2:45 PM",
+      "uniform": "Pack both kits",
+      "status": "scheduled",
+      "type": "group"
+    },
+    {
+      "id": "32",
+      "date": "2026-08-23",
+      "time": "10:30 AM EDT",
+      "opponent": "JFC NFPL B2017/18 Elite Blue",
+      "venue": "Chuck Rogers Park",
+      "field": "Field 5",
+      "arrival": "9:45 AM",
+      "uniform": "Pack both kits",
+      "status": "scheduled",
+      "type": "group"
+    },
+    {
+      "id": "33",
+      "date": "2026-08-23",
+      "time": "2:15 PM EDT",
+      "opponent": "Bracket A #1 vs #2 (Final)",
+      "venue": "Chuck Rogers Park",
+      "field": "Field 5",
+      "arrival": "1:30 PM",
+      "uniform": "Pack both kits",
+      "status": "conditional",
+      "type": "final"
+    }
+  ],
+  "scheduleStatus": "confirmed",
+  "scheduleExpected": "Schedule confirmed Aug 17: G1 Sat 10:30 AM Field 7, G2 Sat 3:30 PM Field 6, G3 Sun 10:30 AM Field 5, Bracket A Final Sun 2:15 PM Field 5. 4-team U9 Boys Silver, Bracket A.",
+  "bracket": {
+    "division": "U9 Boys Silver",
+    "bracketName": "Bracket A",
+    "teams": [
+      {
+        "name": "Savannah United 17/18B Premier",
+        "state": "GA"
+      },
+      {
+        "name": "JAX NFPL B2017/18 N1 DEV 1",
+        "state": "FL"
+      },
+      {
+        "name": "JFC NFPL B2017/18 Elite Blue",
+        "state": "FL"
+      },
+      {
+        "name": "PC NFPL B2017/18 Dev 1",
+        "state": "FL"
+      }
+    ],
+    "format": "4-team bracket — round-robin (3 games) + Bracket A #1 vs #2 final (Sun 2:15 PM)",
+    "gameGuarantee": "3 games minimum + potential final (depending on bracket standings)"
+  },
+  "u9Venues": [
+    {
+      "name": "Veterans Park",
+      "address": "1332 Veterans Pkwy, St. Johns, FL 32259",
+      "fields": "Fields 3, 4, 5, 5E"
+    },
+    {
+      "name": "Earl Johnson Park",
+      "address": "5308 St. Augustine Rd, Jacksonville, FL 32207",
+      "fields": "Fields 3, 4"
+    },
+    {
+      "name": "Chuck Rogers Park",
+      "address": "11950 San Jose Blvd, Jacksonville, FL 32223",
+      "fields": "Fields 5, 6, 7"
+    }
+  ],
+  "gotsportScheduleUrl": "https://system.gotsport.com/org_event/events/54816",
+  "scheduleReleased": true
 }

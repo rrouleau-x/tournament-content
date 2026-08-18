@@ -4,15 +4,15 @@
     "portal": "https://system.gotsport.com/stores/1903604Y4",
     "official": [
       {
-        "name": "Hampton Inn & Suites Bartram Park",
+        "name": "Hampton Inn & Suites Jacksonville South - Bartram Park",
         "chain": "Hilton",
-        "rate": "$143/night",
-        "total2Nights": "$286+",
-        "rooms": 1,
-        "drive": "7.9 mi · 15 min",
+        "rate": "$119/night (non-refundable) or $139 (free cancel)",
+        "total2Nights": "$238-278+",
+        "rooms": 9,
+        "drive": "7.9 mi \u00b7 15 min",
         "route": "Bartram Park Blvd & Race Track Rd",
         "amenities": [
-          "Free breakfast",
+          "Free hot breakfast",
           "Free parking",
           "Outdoor pool",
           "Pet-friendly",
@@ -20,50 +20,56 @@
         ],
         "rating": 4.5,
         "bestValue": true,
-        "bookUrl": "https://system.gotsport.com/stores/1903604Y4"
+        "bookUrl": "https://www.booking.com"
       },
       {
-        "name": "Fairfield Inn & Suites Butler Blvd",
-        "chain": "Marriott ★ Points",
-        "rate": "$139/night",
-        "rooms": 35,
-        "drive": "17.4 mi · 22 min",
+        "name": "Fairfield Inn & Suites Jacksonville Butler Boulevard",
+        "chain": "Marriott \u2605 Points",
+        "rate": "$110/night (non-refundable) or $129 (free cancel)",
+        "total2Nights": "$220-258+",
+        "rooms": 5,
+        "drive": "17.4 mi \u00b7 22 min",
         "route": "I-95 S",
         "amenities": [
+          "Free buffet breakfast",
           "Outdoor pool",
           "Whirlpool",
           "Marriott Bonvoy"
         ],
-        "bestValue": false
+        "bestValue": false,
+        "bookUrl": "https://www.booking.com"
       },
       {
-        "name": "Aloft by Marriott Tapestry Park",
-        "chain": "Marriott ★ Points",
-        "rate": "$139/night",
-        "rooms": 34,
-        "drive": "18.8 mi · 25 min",
+        "name": "Aloft by Marriott Jacksonville Tapestry Park",
+        "chain": "Marriott \u2605 Points",
+        "rate": "$116/night (breakfast $9 extra)",
+        "total2Nights": "$232+",
+        "rooms": 10,
+        "drive": "18.3 mi \u00b7 25 min",
         "route": "FL-9B S",
         "amenities": [
           "On-site bar & restaurant",
           "Outdoor pool",
           "Marriott Bonvoy"
         ],
-        "bestValue": false
+        "bestValue": false,
+        "bookUrl": "https://www.booking.com"
       }
     ],
     "nonOfficial": [
       {
-        "name": "HI Express Bartram Park",
-        "drive": "3.5 mi · 6 min",
-        "note": "Closest to venue. Not on GotSport portal."
+        "name": "Holiday Inn Express Jacksonville South - Bartram Park",
+        "chain": "IHG",
+        "drive": "7.9 mi \u00b7 16 min",
+        "note": "$128/night, free breakfast (rated 10.0), 6+ rooms. Adjacent to Hampton Inn. Not on GotSport portal."
       },
       {
-        "name": "Courtyard Flagler Center",
-        "chain": "Marriott ★ Points",
-        "drive": "8.6 mi · 12 min",
-        "note": "Marriott Bonvoy eligible. Not on GotSport."
+        "name": "Courtyard by Marriott Jacksonville Flagler Center",
+        "chain": "Marriott \u2605 Points",
+        "drive": "9.4 mi \u00b7 16 min",
+        "note": "$105/night (lowest rate), breakfast $7 extra, 5 rooms. Not on GotSport portal."
       }
     ],
-    "updatedAt": "2026-08-05T16:48:56-0400"
+    "updatedAt": "2026-08-16T09:27:50-0400"
   }
 }

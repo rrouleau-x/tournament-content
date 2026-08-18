@@ -2,11 +2,59 @@
   "updates": [
     {
       "type": "warning",
+      "title": "Weather Alert: Rain likely BOTH days — Sunday now 88%",
+      "description": "Sunday forecast jumped to 88% rain with thunderstorms (up from 59%). Saturday at 56%. Heat intensified \u2014 RealFeel 107F Sat, 102F Sun, 108F Friday travel day. Pack rain gear for both game days.",
+      "time": "Aug 18 \u00b7 7:30 AM",
+      "posted": "Bob Team Manager",
+      "actionRequired": true
+    },
+    {
+      "type": "warning",
       "title": "Bring white & blue jerseys",
-      "description": "Uniform confirmation — but pack both kits in case of late change",
-      "time": "Jul 30 · 6:00 PM",
+      "description": "Uniform confirmation \u2014 but pack both kits in case of late change",
+      "time": "Jul 30 \u00b7 6:00 PM",
       "posted": "Coach Keith",
       "actionRequired": false
+    },
+    {
+      "type": "info",
+      "title": "Pre-tournament practice schedule (updated)",
+      "description": "Practice schedule has changed since originally posted. The Thu Aug 13 practice was CANCELED. A new Saturday practice was added Aug 15 at 10:30 AM at JRSC Field 8. Current upcoming pre-tournament practices: Mon Aug 17 and Wed Aug 19, both 5:30\u20137:00 PM at Jennifer Ross Soccer Complex Field 7. Note: Savannah fields were closed Aug 11 due to weather.",
+      "time": "2026-08-16T09:15:00-0400",
+      "posted": "Savannah United",
+      "actionRequired": false
+    },
+    {
+      "type": "info",
+      "title": "Fall events added to team calendar",
+      "description": "New team events posted: Local Festival Sat Sep 12 (JRSC), 1-Day Festival Sat Sep 19 & Sat Sep 26 (JRSC), and Carolina Cup Sat\u2013Sun Oct 3\u20134 in Columbia, SC \u2014 an away tournament, so plan travel early.",
+      "time": "Aug 5",
+      "posted": "Savannah United",
+      "actionRequired": false
+    },
+    {
+      "type": "warning",
+      "title": "Stay-to-play booking deadline has passed",
+      "description": "The Sporting Jax stay-to-play portal now shows the reservation deadline has passed \u2014 new bookings are request-only. Cancellations within 7 days of check-in incur a $25 fee; within 72 hours, one night's room rate. The portal's available hotel inventory and rates have also changed since our last update, so review the portal directly for current options before booking. Existing reservations are unaffected.",
+      "time": "2026-08-12T08:00:21-0400",
+      "posted": "Savannah United",
+      "actionRequired": true
+    },
+    {
+      "type": "info",
+      "title": "Post-tournament practices posted (Aug 24 & 26)",
+      "description": "Two practices scheduled after the Sporting Jax tournament: Mon Aug 24 and Wed Aug 26, both 5:30\u20137:00 PM at Jennifer Ross Soccer Complex Field 7. Regular season training resumes immediately after the tournament weekend.",
+      "time": "2026-08-16T09:20:00-0400",
+      "posted": "Savannah United",
+      "actionRequired": false
+    },
+    {
+      "type": "warning",
+      "title": "Set Niko's attendance for Sporting Jax in PlayMetrics",
+      "description": "PlayMetrics is sending repeated reminders to update Niko Rouleau's attendance for upcoming events including the Sporting Jax tournament (Aug 22\u201323). Open the PlayMetrics app or website, go to the team summary page, and click 'Set Player Availability' before the tournament begins.",
+      "time": "2026-08-16T09:25:00-0400",
+      "posted": "Savannah United",
+      "actionRequired": true
     }
   ]
 }

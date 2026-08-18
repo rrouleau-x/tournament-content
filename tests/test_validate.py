@@ -29,7 +29,7 @@ NEGATIVE_CASES = [
     ("game missing required fields",
      lambda b: b.__setitem__("games", [{"id": "g1"}])),
     ("confirmed status, no games",
-     lambda b: b.__setitem__("scheduleStatus", "confirmed")),
+     lambda b: (b.__setitem__("scheduleStatus", "confirmed"), b.__setitem__("games", []))),
     ("bad drive format",
      lambda b: b["hotels"]["official"][0].__setitem__("drive", "7.9 miles away")),
     ("nested typo'd field",

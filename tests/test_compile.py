@@ -17,7 +17,7 @@ def test_positive_path_compiles_all_modules():
     assert unknown == []
     assert bundle["tournament"]["name"] == "Sporting Jax Boys Invitational"
     assert bundle["team"]["name"] == "Savannah United 17/18B"
-    assert bundle["hotels"]["official"][0]["rate"] == "$143/night"
+    assert bundle["hotels"]["official"][0]["rate"] == "$119/night (non-refundable) or $139 (free cancel)"
 
 
 def test_compile_semantically_matches_live_bundle():

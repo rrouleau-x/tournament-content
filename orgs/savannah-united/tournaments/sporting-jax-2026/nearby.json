@@ -1,29 +1,36 @@
 {
   "nearby": {
     "urgentCare": {
-      "name": "Baptist Health Emergency",
-      "address": "2310 Village Square Pkwy, Fleming Island",
-      "phone": "904-516-2300",
-      "drive": "~17 min",
-      "maps": "https://www.google.com/maps/?q=Baptist+Health+Emergency+Fleming+Island"
+      "name": "CareSpot Urgent Care",
+      "address": "70 Durbin Pavilion Dr, Suite 101, St. Johns, FL 32259",
+      "phone": "904-295-0038",
+      "drive": "8am-8pm daily",
+      "maps": "https://www.google.com/maps/?q=CareSpot+Urgent+Care+Durbin+Pavilion+St+Johns+FL"
     },
     "target": {
-      "name": "Target",
-      "address": "1490 County Rd 210, St. Johns",
-      "drive": "~7 min",
-      "maps": "https://www.google.com/maps/?q=Target+County+Rd+210+St+Johns+FL"
+      "name": "Academy Sports + Outdoors",
+      "address": "9041 Southside Blvd, Jacksonville, FL 32256",
+      "drive": "Closest sporting goods to venue",
+      "maps": "https://www.google.com/maps/?q=Academy+Sports+Outdoors+Southside+Blvd+Jacksonville+FL"
     },
     "dicks": {
-      "name": "Dick's Sporting Goods",
-      "address": "10390 Midtown Pkwy, Jacksonville",
-      "drive": "~15 min",
-      "maps": "https://www.google.com/maps/?q=Dicks+Sporting+Goods+Midtown+Pkwy+Jacksonville"
+      "name": "DICK'S Sporting Goods",
+      "address": "14964 Max Leggett Pkwy, Suite 300, Jacksonville, FL 32218",
+      "drive": "~20 min from venue",
+      "maps": "https://www.google.com/maps/?q=Dicks+Sporting+Goods+Max+Leggett+Pkwy+Jacksonville+FL"
+    },
+    "pharmacy": {
+      "name": "Walgreens",
+      "address": "390 SR-13 S, Jacksonville, FL 32259",
+      "phone": "904-230-4696",
+      "drive": "7am-10pm daily",
+      "maps": "https://www.google.com/maps/?q=Walgreens+390+SR-13+S+Jacksonville+FL+32259"
     },
     "coffee": {
-      "name": "Starbucks",
-      "address": "1490 County Rd 210, St. Johns",
-      "drive": "~7 min",
-      "maps": "https://www.google.com/maps/?q=Starbucks+County+Rd+210+St+Johns"
+      "name": "CVS (with MinuteClinic)",
+      "address": "430 SR-13, Jacksonville, FL 32259",
+      "drive": "Walk-ins welcome",
+      "maps": "https://www.google.com/maps/?q=CVS+430+SR-13+Jacksonville+FL+32259"
     }
   }
 }

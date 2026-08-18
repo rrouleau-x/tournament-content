@@ -3,49 +3,65 @@
     "fullLink": "https://docs.google.com/document/d/e/2PACX-1vTfwqpJ6KrFTAWrKkvSay393zfFkZXSUVooPenxd6TStJpcIYHWFJa9kifZJdBQh6ip52gIxifONgO9/pub",
     "keyRules": [
       {
+        "label": "Format",
+        "value": "7v7 · Max roster 12 · Min 5 to start · Size 4 ball"
+      },
+      {
         "label": "Game Length",
-        "value": "25-min halves (U9-U12)"
+        "value": "25-min halves · 5-min halftime"
+      },
+      {
+        "label": "Points",
+        "value": "Win = 3 · Tie = 1 · Loss = 0"
       },
       {
         "label": "Mercy Rule",
-        "value": "6-goal lead → match ends"
+        "value": "6-goal lead at halftime or later → match ends"
+      },
+      {
+        "label": "Goal Cap",
+        "value": "Max 4 goals per game for GD and GF tiebreakers"
       },
       {
         "label": "Substitutions",
-        "value": "Unlimited"
-      },
-      {
-        "label": "Water Breaks",
-        "value": "Mandatory at 85°F+"
+        "value": "Unlimited at goal kicks, throw-ins, kickoffs, halftime, injury"
       },
       {
         "label": "Heading",
-        "value": "Not allowed U12 and younger"
+        "value": "Not allowed U12 and younger → indirect free kick"
+      },
+      {
+        "label": "Water Breaks",
+        "value": "Mandatory mid-half at 85°F+ (FYSA Rule 402.4)"
       },
       {
         "label": "Forfeit",
-        "value": "5 min late. Min 5 players."
+        "value": "5 min late (10 min finals). Min 5 players. Recorded as 4-0 loss."
       },
       {
         "label": "Zero Tolerance",
-        "value": "No ref abuse"
+        "value": "No ref abuse — immediate removal + suspension"
       },
       {
         "label": "Weather",
-        "value": "30-min delay clock"
+        "value": "30-min delay clock. Post-halftime stoppage = completed game."
       },
       {
         "label": "Championship",
-        "value": "No OT — straight to PKs"
+        "value": "No OT — straight to PKs if tied"
+      },
+      {
+        "label": "Stay-to-Play",
+        "value": "Required for teams 90+ miles. Exception: TDirector@SportingJaxAcademy.com"
       }
     ],
     "tiebreakers": [
       "Head-to-Head (disregarded if 3+ teams tied)",
       "Goal Differential — max 4 per game",
       "Goals For — max 4 per game",
-      "Goals Against — fewest allowed",
+      "Goals Against — fewest allowed (no cap)",
       "Shutouts — most clean sheets",
-      "Penalty Kicks — FIFA Kicks"
+      "Penalty Kicks — FIFA Kicks from the Penalty Mark"
     ]
   }
 }

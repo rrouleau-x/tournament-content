@@ -109,6 +109,9 @@
           "opponent": { "type": "string", "minLength": 1 },
           "venue": { "type": "string" },
           "field": { "type": "string" },
+          "arrival": { "type": "string", "description": "Player report/arrival time (kickoff minus 45 min). App shows 'Arrive'." },
+          "uniform": { "type": "string", "description": "Which kit to wear (e.g. 'Blue jerseys')." },
+          "status": { "type": "string", "enum": ["scheduled", "complete", "conditional", "cancelled"], "description": "Game state shown in the app." },
           "type": { "type": "string", "enum": ["group", "quarterfinal", "semifinal", "final", "showcase"] }
         },
         "required": ["date", "time", "opponent"],

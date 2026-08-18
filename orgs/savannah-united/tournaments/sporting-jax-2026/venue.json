@@ -1,28 +1,28 @@
 {
   "venue": {
-    "name": "Veterans Park",
-    "address": "1332 Veterans Parkway, St. Johns, FL 32259",
+    "name": "Chuck Rogers Park",
+    "address": "11950 San Jose Blvd, Jacksonville, FL 32223",
     "coordinates": {
-      "lat": 30.0821,
-      "lng": -81.5484
+      "lat": 30.1544,
+      "lng": -81.6328
     },
-    "mapsUrl": "https://www.google.com/maps/?q=1332+Veterans+Pkwy+St+Johns+FL+32259",
-    "parking": "Free main paved lot (Fields 1-4). Overflow grass lot at east end (Fields 5-6). No parking on grass near Fields 1-2. Arrive 30-45 min early.",
+    "mapsUrl": "https://www.google.com/maps/dir/Chuck+Rogers+Park,11950+San+Jose+Blvd,Jacksonville,FL+32223",
+    "parking": "Free on-site parking. Arrive 30-45 min early — lots fill on tournament days.",
     "fields": {
-      "count": 6,
-      "surface": "5 grass + 1 turf (all lighted)",
+      "count": 8,
+      "surface": "Grass (City of Jacksonville park)",
       "map": "https://docs.google.com/presentation/d/e/2PACX-1vQCJyfhW8bCpxTk5HXfMKEEbekRHoaQ4FtYkLSzNfe8McocTmwMratx3skY7bvF2nmKkWDnPnknJXTs/pub",
       "layoutNotes": {
-        "1_2": "Near main lot, west restrooms, concessions",
-        "3_4": "Near central pavilion, bathrooms, AED, team tent area",
-        "5_6": "Near east restrooms, overflow parking. Field 6 is turf."
+        "1_2": "Restrooms, concession stand and parking nearby",
+        "3_4": "Restrooms, concession stand and picnic shelters nearby",
+        "5_6": "Restrooms, concession stand and parking nearby"
       }
     },
     "amenities": {
       "concessions": true,
       "restrooms": true,
       "shade": "Limited — bring canopy",
-      "aed": true,
+      "aed": false,
       "playground": true
     }
   }

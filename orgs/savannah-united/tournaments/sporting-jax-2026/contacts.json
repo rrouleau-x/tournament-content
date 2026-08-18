@@ -1,39 +1,37 @@
 {
   "contacts": {
     "manager": {
-      "name": "Jenn Boyd",
-      "role": "Team Manager",
-      "phone": "770-757-1617",
-      "email": "jsboyd21@gmail.com"
+      "name": "Rich Rouleau",
+      "role": "Parent Team Manager",
+      "phone": "",
+      "email": "rrouleau@mac.com"
     },
     "coach": {
       "name": "Keith Gunn",
       "role": "Head Coach",
-      "phone": ""
+      "phone": "912-856-9442",
+      "email": "keith.gunn@savannahunited.com"
     },
     "teamManagers": [
       {
-        "name": "Victoria Huryn",
-        "phone": "859-445-2028",
-        "email": "victoriaamberlong@gmail.com"
+        "name": "Carson Gray",
+        "phone": "770-757-1617",
+        "email": "carson.gray@savannahunited.com"
       },
       {
-        "name": "David Shuman Jr",
-        "phone": "",
-        "email": "d.shuman@savannahunited.com"
+        "name": "Mitchell Heath",
+        "phone": "859-445-2028",
+        "email": "mitchell.heath@savannahunited.com"
       }
     ],
     "premierStaff": [
       {
         "name": "Mitchell Heath",
-        "role": "Premier Staff"
+        "role": "Premier Staff",
+        "phone": "912-856-9442"
       },
       {
         "name": "Carson Gray",
-        "role": "Premier Staff"
-      },
-      {
-        "name": "Premier Staff Contact",
         "role": "Premier Staff",
         "phone": "912-856-9442"
       }
@@ -41,8 +39,8 @@
     "tournamentDirector": {
       "name": "Tournament Director",
       "email": "TDirector@SportingJaxAcademy.com",
-      "phone": ""
+      "phone": "904-257-5575"
     },
-    "emergency": ""
+    "emergency": "911"
   }
 }

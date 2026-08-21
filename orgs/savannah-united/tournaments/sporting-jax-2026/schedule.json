@@ -8,7 +8,7 @@
       "venue": "Chuck Rogers Park",
       "field": "Field 7",
       "arrival": "9:45 AM",
-      "uniform": "Pack both kits",
+      "uniform": "Away — Blue (pack both kits)",
       "status": "scheduled",
       "type": "group"
     },
@@ -20,7 +20,7 @@
       "venue": "Chuck Rogers Park",
       "field": "Field 6",
       "arrival": "2:45 PM",
-      "uniform": "Pack both kits",
+      "uniform": "Home — White (pack both kits)",
       "status": "scheduled",
       "type": "group"
     },
@@ -32,7 +32,7 @@
       "venue": "Chuck Rogers Park",
       "field": "Field 5",
       "arrival": "9:45 AM",
-      "uniform": "Pack both kits",
+      "uniform": "Home — White (pack both kits)",
       "status": "scheduled",
       "type": "group"
     },

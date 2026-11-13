@@ -7,94 +7,194 @@
   "properties": {
     "sport": {
       "type": "string",
-      "enum": ["soccer", "baseball", "basketball", "football", "lacrosse", "volleyball", "other"]
+      "enum": [
+        "soccer",
+        "baseball",
+        "basketball",
+        "football",
+        "lacrosse",
+        "volleyball",
+        "other"
+      ]
     },
     "sportConfig": {
       "type": "object",
       "description": "Sport-specific labels so the same app shell works for any sport.",
       "properties": {
-        "teamLabel": { "type": "string" },
-        "fieldLabel": { "type": "string" },
-        "matchLabel": { "type": "string" },
-        "uniformLabel": { "type": "string" },
-        "cleatsLabel": { "type": "string" }
+        "teamLabel": {
+          "type": "string"
+        },
+        "fieldLabel": {
+          "type": "string"
+        },
+        "matchLabel": {
+          "type": "string"
+        },
+        "uniformLabel": {
+          "type": "string"
+        },
+        "cleatsLabel": {
+          "type": "string"
+        }
       },
-      "required": ["teamLabel", "fieldLabel", "matchLabel"],
+      "required": [
+        "teamLabel",
+        "fieldLabel",
+        "matchLabel"
+      ],
       "additionalProperties": false
     },
     "tournament": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "shortName": { "type": "string" },
-        "organizer": { "type": "string" },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shortName": {
+          "type": "string"
+        },
+        "organizer": {
+          "type": "string"
+        },
         "dates": {
           "type": "object",
           "properties": {
-            "start": { "type": "string", "format": "date" },
-            "end": { "type": "string", "format": "date" }
+            "start": {
+              "type": "string",
+              "format": "date"
+            },
+            "end": {
+              "type": "string",
+              "format": "date"
+            }
           },
-          "required": ["start", "end"],
+          "required": [
+            "start",
+            "end"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["name", "dates"],
+      "required": [
+        "name",
+        "dates"
+      ],
       "additionalProperties": false
     },
     "team": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "shortName": { "type": "string" },
-        "colors": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
-        "logo": { "type": "string" }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shortName": {
+          "type": "string"
+        },
+        "colors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3
+        },
+        "logo": {
+          "type": "string"
+        }
       },
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false
     },
     "venue": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "address": { "type": "string", "minLength": 1 },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
         "coordinates": {
           "type": "object",
           "properties": {
-            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
-            "lng": { "type": "number", "minimum": -180, "maximum": 180 }
+            "lat": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "lng": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            }
           },
           "additionalProperties": false
         },
-        "mapsUrl": { "type": "string", "format": "uri" },
-        "parking": { "type": "string" },
+        "mapsUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "parking": {
+          "type": "string"
+        },
         "fields": {
           "type": "object",
           "properties": {
-            "count": { "type": "integer", "minimum": 1 },
-            "surface": { "type": "string" },
-            "map": { "type": "string", "format": "uri" },
+            "count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "surface": {
+              "type": "string"
+            },
+            "map": {
+              "type": "string",
+              "format": "uri"
+            },
             "layoutNotes": {
               "type": "object",
               "description": "Free-form field-number → note map (dynamic keys).",
-              "additionalProperties": { "type": "string" }
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           },
-          "required": ["count"],
+          "required": [
+            "count"
+          ],
           "additionalProperties": false
         },
         "amenities": {
           "type": "object",
           "properties": {
-            "concessions": { "type": "boolean" },
-            "restrooms": { "type": "boolean" },
-            "shade": { "type": "string" },
-            "aed": { "type": "boolean" },
-            "playground": { "type": "boolean" }
+            "concessions": {
+              "type": "boolean"
+            },
+            "restrooms": {
+              "type": "boolean"
+            },
+            "shade": {
+              "type": "string"
+            },
+            "aed": {
+              "type": "boolean"
+            },
+            "playground": {
+              "type": "boolean"
+            }
           },
           "additionalProperties": false
         }
       },
-      "required": ["name", "address"],
+      "required": [
+        "name",
+        "address"
+      ],
       "additionalProperties": false
     },
     "games": {
@@ -103,31 +203,85 @@
       "items": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "date": { "type": "string", "format": "date" },
-          "time": { "type": "string", "minLength": 1 },
-          "opponent": { "type": "string", "minLength": 1 },
-          "venue": { "type": "string" },
-          "field": { "type": "string" },
-          "arrival": { "type": "string", "description": "Player report/arrival time (kickoff minus 45 min). App shows 'Arrive'." },
-          "uniform": { "type": "string", "description": "Which kit to wear (e.g. 'Blue jerseys')." },
-          "status": { "type": "string", "enum": ["scheduled", "complete", "conditional", "cancelled"], "description": "Game state shown in the app." },
-          "type": { "type": "string", "enum": ["group", "quarterfinal", "semifinal", "final", "showcase"] }
+          "id": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "time": {
+            "type": "string",
+            "minLength": 1
+          },
+          "opponent": {
+            "type": "string",
+            "minLength": 1
+          },
+          "venue": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "arrival": {
+            "type": "string",
+            "description": "Player report/arrival time (kickoff minus 45 min). App shows 'Arrive'."
+          },
+          "uniform": {
+            "type": "string",
+            "description": "Which kit to wear (e.g. 'Blue jerseys')."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "complete",
+              "conditional",
+              "cancelled"
+            ],
+            "description": "Game state shown in the app."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "group",
+              "quarterfinal",
+              "semifinal",
+              "final",
+              "showcase"
+            ]
+          }
         },
-        "required": ["date", "time", "opponent"],
+        "required": [
+          "date",
+          "time",
+          "opponent"
+        ],
         "additionalProperties": false
       }
     },
     "scheduleStatus": {
       "type": "string",
-      "enum": ["pending", "partial", "confirmed"]
+      "enum": [
+        "pending",
+        "partial",
+        "confirmed"
+      ]
     },
-    "scheduleExpected": { "type": "string" },
+    "scheduleExpected": {
+      "type": "string"
+    },
     "hotels": {
       "type": "object",
       "properties": {
-        "stayToPlay": { "type": "boolean" },
-        "portal": { "type": "string", "format": "uri" },
+        "stayToPlay": {
+          "type": "boolean"
+        },
+        "portal": {
+          "type": "string",
+          "format": "uri"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
@@ -139,19 +293,53 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "chain": { "type": "string" },
-              "rate": { "type": "string" },
-              "total2Nights": { "type": "string" },
-              "rooms": { "type": "integer", "minimum": 0 },
-              "drive": { "type": "string", "pattern": "^\\d+(\\.\\d+)?\\s*(mi|miles?)\\s*[·•\\-–—]\\s*~?\\d+\\s*min$" },
-              "route": { "type": "string" },
-              "amenities": { "type": "array", "items": { "type": "string" } },
-              "rating": { "type": "number", "minimum": 0, "maximum": 5 },
-              "bestValue": { "type": "boolean" },
-              "bookUrl": { "type": "string", "format": "uri" }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "chain": {
+                "type": "string"
+              },
+              "rate": {
+                "type": "string"
+              },
+              "total2Nights": {
+                "type": "string"
+              },
+              "rooms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "drive": {
+                "type": "string",
+                "pattern": "^\\d+(\\.\\d+)?\\s*(mi|miles?)\\s*[·•\\-–—]\\s*~?\\d+\\s*min$"
+              },
+              "route": {
+                "type": "string"
+              },
+              "amenities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "rating": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 5
+              },
+              "bestValue": {
+                "type": "boolean"
+              },
+              "bookUrl": {
+                "type": "string",
+                "format": "uri"
+              }
             },
-            "required": ["name", "drive"],
+            "required": [
+              "name",
+              "drive"
+            ],
             "additionalProperties": false
           }
         },
@@ -160,48 +348,95 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "chain": { "type": "string" },
-              "drive": { "type": "string", "pattern": "^\\d+(\\.\\d+)?\\s*(mi|miles?)\\s*[·•\\-–—]\\s*~?\\d+\\s*min$" },
-              "note": { "type": "string" }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "chain": {
+                "type": "string"
+              },
+              "drive": {
+                "type": "string",
+                "pattern": "^\\d+(\\.\\d+)?\\s*(mi|miles?)\\s*[·•\\-–—]\\s*~?\\d+\\s*min$"
+              },
+              "note": {
+                "type": "string"
+              }
             },
-            "required": ["name", "drive"],
+            "required": [
+              "name",
+              "drive"
+            ],
             "additionalProperties": false
           }
         }
       },
-      "required": ["stayToPlay"],
+      "required": [
+        "stayToPlay"
+      ],
       "additionalProperties": false
     },
     "weather": {
       "type": "object",
       "properties": {
-        "summary": { "type": "string" },
-        "details": { "type": "string" },
-        "forecastLink": { "type": "string" },
-        "source": { "type": "string", "description": "Provenance of this forecast (e.g. National Weather Service)" },
-        "sourceApiUrl": { "type": "string", "format": "uri", "description": "Machine-readable source API URL (provenance, not a parent link)" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "When the forecast was fetched" }
+        "summary": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "forecastLink": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "description": "Provenance of this forecast (e.g. National Weather Service)"
+        },
+        "sourceApiUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Machine-readable source API URL (provenance, not a parent link)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the forecast was fetched"
+        }
       },
       "additionalProperties": false
     },
     "rules": {
       "type": "object",
       "properties": {
-        "fullLink": { "type": "string", "format": "uri" },
+        "fullLink": {
+          "type": "string",
+          "format": "uri"
+        },
         "keyRules": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "label": { "type": "string" },
-              "value": { "type": "string" }
+              "label": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
             },
-            "required": ["label", "value"],
+            "required": [
+              "label",
+              "value"
+            ],
             "additionalProperties": false
           }
         },
-        "tiebreakers": { "type": "array", "items": { "type": "string" } }
+        "tiebreakers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": false
     },
@@ -210,14 +445,36 @@
       "items": {
         "type": "object",
         "properties": {
-          "type": { "type": "string", "enum": ["info", "warning", "alert", "success"] },
-          "title": { "type": "string", "minLength": 1 },
-          "description": { "type": "string" },
-          "time": { "type": "string" },
-          "posted": { "type": "string" },
-          "actionRequired": { "type": "boolean" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "alert",
+              "success"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "posted": {
+            "type": "string"
+          },
+          "actionRequired": {
+            "type": "boolean"
+          }
         },
-        "required": ["type", "title"],
+        "required": [
+          "type",
+          "title"
+        ],
         "additionalProperties": false
       }
     },
@@ -227,20 +484,38 @@
         "manager": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "role": { "type": "string" },
-            "phone": { "type": "string" },
-            "email": { "type": "string", "format": "email" }
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "phone": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string",
+              "format": "email"
+            }
           },
           "additionalProperties": false
         },
         "coach": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "role": { "type": "string" },
-            "phone": { "type": "string" },
-            "email": { "type": "string", "format": "email" }
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "phone": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string",
+              "format": "email"
+            }
           },
           "additionalProperties": false
         },
@@ -249,9 +524,19 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string" },
-              "phone": { "type": "string" },
-              "email": { "type": "string", "format": "email" }
+              "name": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "role": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -261,9 +546,15 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string" },
-              "role": { "type": "string" },
-              "phone": { "type": "string" }
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -271,35 +562,76 @@
         "tournamentDirector": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "email": { "type": "string", "format": "email" },
-            "phone": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string",
+              "format": "email"
+            },
+            "phone": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "emergency": { "type": "string" }
+        "emergency": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "venueRules": {
       "type": "object",
       "properties": {
-        "tents": { "type": "string" },
-        "pets": { "type": "string" },
-        "foodCooler": { "type": "string" },
-        "chairs": { "type": "string" },
-        "alcohol": { "type": "string" },
-        "smoking": { "type": "string" }
+        "tents": {
+          "type": "string"
+        },
+        "pets": {
+          "type": "string"
+        },
+        "foodCooler": {
+          "type": "string"
+        },
+        "chairs": {
+          "type": "string"
+        },
+        "alcohol": {
+          "type": "string"
+        },
+        "smoking": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "checklist": {
       "type": "object",
       "properties": {
-        "player": { "type": "array", "items": { "type": "string" } },
-        "weather": { "type": "array", "items": { "type": "string" } },
-        "parent": { "type": "array", "items": { "type": "string" } },
-        "emergency": { "type": "array", "items": { "type": "string" } }
+        "player": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "weather": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parent": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "emergency": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": false
     },
@@ -309,25 +641,51 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "name": { "type": "string" },
-          "address": { "type": "string" },
-          "phone": { "type": "string" },
-          "drive": { "type": "string" },
-          "maps": { "type": "string", "format": "uri" }
+          "name": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "drive": {
+            "type": "string"
+          },
+          "maps": {
+            "type": "string",
+            "format": "uri"
+          }
         },
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "additionalProperties": false
       }
     },
     "offline": {
       "type": "object",
       "properties": {
-        "pdfGuideUrl": { "type": "string" },
-        "lastCached": { "type": "string" }
+        "pdfGuideUrl": {
+          "type": "string"
+        },
+        "lastCached": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     }
   },
-  "required": ["sport", "tournament", "team", "venue", "scheduleStatus", "updates", "contacts", "checklist"],
+  "required": [
+    "sport",
+    "tournament",
+    "team",
+    "venue",
+    "scheduleStatus",
+    "updates",
+    "contacts",
+    "checklist"
+  ],
   "additionalProperties": false
 }

@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "Florida Elite Winter Invitational",
+    "shortName": "Florida Elite",
+    "organizer": "Florida Elite Soccer Academy",
+    "dates": {
+      "start": "2027-01-23",
+      "end": "2027-01-24"
+    }
+  }
+}

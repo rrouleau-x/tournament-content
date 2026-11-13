@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "Coast FA Spring Classic",
+    "shortName": "Coast FA Classic",
+    "organizer": "Coast FA",
+    "dates": {
+      "start": "2027-04-24",
+      "end": "2027-04-25"
+    }
+  }
+}

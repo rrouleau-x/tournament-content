@@ -1,0 +1,11 @@
+{
+  "tournament": {
+    "name": "FESA Florida State Invitational (OPTIONAL)",
+    "shortName": "FESA Invitational",
+    "organizer": "Florida Elite Soccer Academy",
+    "dates": {
+      "start": "2027-04-03",
+      "end": "2027-04-04"
+    }
+  }
+}

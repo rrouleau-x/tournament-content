@@ -51,6 +51,7 @@ Endpoints:
 """
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -271,6 +272,41 @@ def valid_identifier(value):
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# ── history cache ───────────────────────────────────────────────────────
+# `git log --follow` costs ~140 ms per request and the UI hits /history every
+# time a module panel opens. `git rev-parse HEAD` costs ~5 ms, so the cache is
+# keyed on (pathspec, limit) and stamped with HEAD + the working-tree mtime of
+# the file/dir: any commit or unsaved edit changes the stamp and misses the
+# cache. Bounded by _HISTORY_CACHE_MAX so a long-lived server can't grow.
+_HISTORY_CACHE = {}
+_HISTORY_CACHE_MAX = 256
+_HISTORY_LOCK = threading.Lock()
+_BLOB_CACHE = {}   # (sha, relpath) -> file text; commit blobs are immutable
+
+
+def _git(args, timeout=20):
+    return subprocess.run(["git", "-C", REPO_ROOT] + args,
+                          capture_output=True, text=True, timeout=timeout)
+
+
+def _repo_stamp(pathspec):
+    """Cheap fingerprint of the repo state that can change a file's history.
+
+    Pure os.stat — no subprocess. `git rev-parse HEAD` looked cheap but still
+    costs ~60 ms per call, which dominated the very request the cache exists to
+    speed up. A commit always touches .git/index and the branch ref, and an
+    unsaved edit touches the file itself, so the max of those mtimes is a
+    sound invalidation signal for this single-user server.
+    """
+    marks = []
+    for rel in (".git/index", ".git/refs/heads/main", ".git/packed-refs", pathspec):
+        p = rel if os.path.isabs(rel) else os.path.join(REPO_ROOT, rel)
+        try:
+            marks.append(os.stat(p).st_mtime_ns)
+        except OSError:
+            continue
+    return str(max(marks) if marks else 0)
+
 
 def module_history(org, slug, module=None, limit=50):
     """Git history for a tournament's module file(s) in the CONTENT repo.
@@ -284,12 +320,17 @@ def module_history(org, slug, module=None, limit=50):
     if module:
         fpath = safe_module_path(tdir, module)  # validates containment
     limit = max(1, min(int(limit), 200))
+    stamp = _repo_stamp(pathspec)
+    key = (pathspec, limit)
+    with _HISTORY_LOCK:
+        hit = _HISTORY_CACHE.get(key)
+        if hit and hit[0] == stamp:
+            return list(hit[1])
     # %x1f (unit separator) delimited fields — unambiguous to parse.
     # Full SHA (H) so the client can pass it straight back to /diff.
     fmt = "%x1f%H%x1f%cI%x1f%an%x1f%s%x1e"
-    cmd = ["git", "-C", REPO_ROOT, "log", f"-{limit}",
-           f"--format={fmt}", "--follow", "--", pathspec]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    cmd = ["log", f"-{limit}", f"--format={fmt}", "--follow", "--", pathspec]
+    r = _git(cmd)
     if r.returncode != 0:
         raise ValueError(f"git log failed: {r.stderr.strip()[:200]}")
     out = []
@@ -308,7 +349,11 @@ def module_history(org, slug, module=None, limit=50):
         short, date, author, message = parts[:4]
         out.append({"sha": short, "date": date, "author": author,
                     "message": message})
-    return out
+    with _HISTORY_LOCK:
+        if len(_HISTORY_CACHE) >= _HISTORY_CACHE_MAX:
+            _HISTORY_CACHE.clear()
+        _HISTORY_CACHE[key] = (stamp, out)
+    return list(out)
 
 
 def module_diff(org, slug, module, from_sha=None, to_sha=None):
@@ -327,10 +372,18 @@ def module_diff(org, slug, module, from_sha=None, to_sha=None):
     def snapshot(sha):
         if not sha:
             return None
-        r = subprocess.run(["git", "-C", REPO_ROOT, "show",
-                            f"{sha}:{rel}"], capture_output=True, text=True)
+        # A commit's blob is immutable, so the snapshot is safe to cache.
+        ckey = (sha, rel)
+        with _HISTORY_LOCK:
+            if ckey in _BLOB_CACHE:
+                return _BLOB_CACHE[ckey]
+        r = _git(["show", f"{sha}:{rel}"])
         if r.returncode != 0:
             return None  # file didn't exist at that commit
+        with _HISTORY_LOCK:
+            if len(_BLOB_CACHE) >= _HISTORY_CACHE_MAX:
+                _BLOB_CACHE.clear()
+            _BLOB_CACHE[ckey] = r.stdout
         return r.stdout
     old = snapshot(from_sha) if from_sha else None
     if to_sha:
@@ -486,6 +539,42 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("[admin] %s\n" % (format % args))
 
     def _send(self, status, headers, body):
+        """Send a response with conditional-GET + gzip.
+
+        The admin UI re-fetches a ~43 KB tournament bundle on every panel
+        change, so two cheap wins matter more than they look:
+          * an ETag lets the client revalidate with `If-None-Match` and get a
+            304 with no body at all;
+          * gzip cuts the JSON/HTML payload by ~75-80%.
+
+        The ETag is computed on the UNCOMPRESSED bytes and is the same for
+        every encoding (marked weak), so a client that gzips and one that
+        doesn't still revalidate correctly. Only 200s are cached; errors and
+        304s never are.
+        """
+        headers = dict(headers)
+        body = body if isinstance(body, (bytes, bytearray)) else bytes(body or b"")
+        etag = None
+        if status == 200 and body:
+            etag = 'W/"%s"' % hashlib.sha1(body).hexdigest()[:20]
+            headers.setdefault("ETag", etag)
+            headers.setdefault("Cache-Control", "private, no-cache")
+            inm = self.headers.get("If-None-Match")
+            if inm and etag in [t.strip() for t in inm.split(",")]:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "private, no-cache")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+        if (status == 200 and len(body) >= 1024
+                and "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+                and not headers.get("Content-Encoding")):
+            gz = gzip.compress(body, 5)
+            if len(gz) < len(body):
+                body = gz
+                headers["Content-Encoding"] = "gzip"
+                headers["Vary"] = "Accept-Encoding"
         self.send_response(status)
         for k, v in headers.items():
             self.send_header(k, v)

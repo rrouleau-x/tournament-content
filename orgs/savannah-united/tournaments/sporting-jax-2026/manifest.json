@@ -13,11 +13,11 @@
   "compiledFrom": "data.json",
   "createdAt": "2026-07-31T12:55:15Z",
   "revision": {
-    "workflow": "published",
-    "digest": "e71d308b4d173061",
+    "workflow": "approved",
+    "digest": "9f03da32c9012a29",
     "reviewer": "admin",
-    "approvedAt": "2026-08-22T12:03:57Z",
-    "publishedAt": "2026-08-22T12:04:00Z",
+    "approvedAt": "2026-11-13T14:22:02Z",
+    "publishedAt": null,
     "version": "v6.0",
     "updated": "2026-08-16T09:50:21-0400"
   }

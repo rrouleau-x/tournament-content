@@ -1,0 +1,10 @@
+{
+  "sport": "soccer",
+  "sportConfig": {
+    "teamLabel": "Team",
+    "fieldLabel": "Field",
+    "matchLabel": "Game",
+    "uniformLabel": "Uniform",
+    "cleatsLabel": "Cleats"
+  }
+}

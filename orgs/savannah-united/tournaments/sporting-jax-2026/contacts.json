@@ -9,31 +9,33 @@
     "coach": {
       "name": "Keith Gunn",
       "role": "Head Coach",
-      "phone": "912-856-9442",
-      "email": "keith.gunn@savannahunited.com"
+      "phone": "",
+      "email": "k.gunn@savannahunited.com"
     },
     "teamManagers": [
       {
-        "name": "Carson Gray",
+        "name": "Jenn Boyd",
         "phone": "770-757-1617",
-        "email": "carson.gray@savannahunited.com"
+        "email": "jsboyd21@gmail.com",
+        "role": "Team Manager"
       },
       {
-        "name": "Mitchell Heath",
+        "name": "Victoria Huryn",
         "phone": "859-445-2028",
-        "email": "mitchell.heath@savannahunited.com"
+        "email": "victoriaamberlong@gmail.com",
+        "role": "Team Manager"
       }
     ],
     "premierStaff": [
       {
-        "name": "Mitchell Heath",
-        "role": "Premier Staff",
+        "name": "Carson Gray",
+        "role": "Assistant Coach",
         "phone": "912-856-9442"
       },
       {
-        "name": "Carson Gray",
-        "role": "Premier Staff",
-        "phone": "912-856-9442"
+        "name": "Mitchell Heath",
+        "role": "Assistant Coach",
+        "phone": ""
       }
     ],
     "tournamentDirector": {

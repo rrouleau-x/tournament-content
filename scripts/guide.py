@@ -28,7 +28,11 @@ from pipeline import (  # noqa: E402
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEMPLATE_SLUG = "sporting-jax-2026"
+# The neutral scaffold under _templates — NOT a live tournament. Copying a real
+# tournament (the old behaviour: "sporting-jax-2026") made every new draft
+# inherit another event's games, hotels and contacts, and inherit its schema
+# errors (contacts.teamManagers[].role) as blocking issues.
+TEMPLATE_SLUG = "tournament-v1"
 
 
 def safe_to_publish(tournament, report, deploy_info=None):
@@ -50,7 +54,12 @@ def safe_to_publish(tournament, report, deploy_info=None):
 
 def cmd_new(args):
     org, slug = parse_tournament_id(args.tournament)
-    src = tournament_dir(org, TEMPLATE_SLUG)
+    if getattr(args, "from_slug", None):
+        # Copy an existing tournament (keeps that event's venue/hotels/etc.)
+        src = tournament_dir(org, args.from_slug)
+    else:
+        # Neutral scaffold: 14 modules, placeholders only, no other event's data
+        src = os.path.join(REPO_ROOT, "_templates", TEMPLATE_SLUG)
     dst = tournament_dir(org, slug)
     if os.path.exists(dst):
         print(f"ERROR: tournament already exists at {dst}", file=sys.stderr)
@@ -63,13 +72,14 @@ def cmd_new(args):
     manifest_path = os.path.join(dst, "manifest.json")
     with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
+    manifest["org"] = org
     manifest["slug"] = slug
     manifest["status"] = "draft"
     manifest["name"] = f"{slug.replace('-', ' ').title()} (edit me)"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
         f.write("\n")
-    print(f"Created {org}/{slug} from template ({TEMPLATE_SLUG}).")
+    print(f"Created {org}/{slug} from {os.path.relpath(src, REPO_ROOT)}.")
     print(f"  Status: draft — set manifest status to 'live' before publishing.")
     print(f"  Edit module files in {dst}")
     return 0
@@ -199,6 +209,8 @@ def main():
 
     p_new = sub.add_parser("new", help="scaffold a tournament from the template")
     p_new.add_argument("tournament", help="org/slug")
+    p_new.add_argument("--from", dest="from_slug", default=None,
+                       help="copy an existing tournament instead of the neutral template")
     p_new.set_defaults(func=cmd_new)
 
     p_check = sub.add_parser("check", help="compile + validate (Guide Health Report)")

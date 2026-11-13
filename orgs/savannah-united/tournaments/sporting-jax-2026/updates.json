@@ -67,9 +67,25 @@
     {
       "type": "info",
       "title": "Travel team not in Sporting Jax — only Premier plays",
-      "description": "PlayMetrics canceled the Sporting Jax tournament events (Sat Aug 22 & Sun Aug 23) for the 17/18B Travel team. Only the 17/18B Premier team is participating in this tournament. If you follow both teams in PlayMetrics, the Travel team's canceled events are expected — not an error.",
+      "description": "PlayMetrics canceled the Sporting Jax tournament events (Sat Aug 22 & Sun Aug 23) for the 17/18B Travel team. Only the 17/18B Premier team is participating in this tournament. Coach Keith confirmed the 10-player Premier roster: Carey Noel, Garrad Logan, Hernandez Joshua, Jones Parker, Levesque Aiden, Rouleau Niko, Rudder Maclin, Torres Carlos, Weber Elliott, Whyte Michael. Non-rostered players' games start Sept 12. If you follow both teams in PlayMetrics, the Travel team's canceled events are expected — not an error.",
       "time": "2026-08-20T08:04:30-0400",
       "posted": "Savannah United",
+      "actionRequired": false
+    },
+    {
+      "type": "info",
+      "title": "Labor Day Holiday Soccer Clinic — registration open",
+      "description": "Savannah United is running a Labor Day Weekend soccer clinic led by Coach Jason Brown (Central Academy staff). 1-day and 3-day options available. Registration is open now via your PlayMetrics account → Club Programs. Check the attached flyer in the PlayMetrics message for full details and pricing.",
+      "time": "2026-08-22T08:00:00-0400",
+      "posted": "Coach Keith Gunn",
+      "actionRequired": true
+    },
+    {
+      "type": "info",
+      "title": "Coach Keith's academy update — travel rosters still being evaluated",
+      "description": "Coach Keith sent a training update (Aug 20): players are doing well despite heat, fitness levels good. Training focus has been defensive shape and 7v7 game time. Travel roster evaluation is ongoing — expect clarity by September. Local players may be invited to travel training/games as the pool solidifies. Coach Keith plans U9 and U10 parents meetings at the fields (~6:30 PM, end of training) in the next couple weeks. No immediate action needed — invitations will come via PlayMetrics notification.",
+      "time": "2026-08-22T08:05:00-0400",
+      "posted": "Coach Keith Gunn",
       "actionRequired": false
     }
   ]

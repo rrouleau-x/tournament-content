@@ -1,0 +1,43 @@
+{
+  "_note": "Club travel squads that share the away slate. Identity verified against the carolina-cup-guide registry (2026-09-13) — tournament entry names differ from PlayMetrics team names, so use these labels in parent-facing copy.",
+  "club": "Savannah United",
+  "defaultTeam": "u9-premier",
+  "teams": [
+    {
+      "slug": "u9-premier",
+      "name": "Savannah United 17/18B Premier",
+      "shortName": "SU 17/18B Premier",
+      "label": "U9 Premier",
+      "ageGroup": "09U",
+      "gender": "Boys",
+      "format": "7v7"
+    },
+    {
+      "slug": "u9-blue",
+      "name": "Savannah United 17/18B Blue",
+      "shortName": "SU 17/18B Blue",
+      "label": "U9 Blue",
+      "ageGroup": "09U",
+      "gender": "Boys",
+      "format": "7v7"
+    },
+    {
+      "slug": "u10-premier",
+      "name": "Savannah United 16/17B Premier",
+      "shortName": "SU 16/17B Premier",
+      "label": "U10 Premier",
+      "ageGroup": "10U",
+      "gender": "Boys",
+      "format": "7v7"
+    },
+    {
+      "slug": "u10-blue",
+      "name": "Savannah United 16/17B Blue",
+      "shortName": "SU 16/17B Blue",
+      "label": "U10 Blue",
+      "ageGroup": "10U",
+      "gender": "Boys",
+      "format": "7v7"
+    }
+  ]
+}

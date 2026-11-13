@@ -125,6 +125,15 @@ def main(argv=None):
     if not args.dry_run:
         write_json(os.path.join(out, "tournaments.json"), index)
 
+    # Team registry (4 travel squads). Shared across every event, so it lives at
+    # org level and is copied verbatim — the app overlays it on each bundle.
+    teams_src = os.path.join(REPO_ROOT, "orgs", args.org, "teams.json")
+    teams = load_json(teams_src, default=None) if os.path.exists(teams_src) else None
+    if teams and not args.dry_run:
+        write_json(os.path.join(out, "teams.json"), teams)
+    elif teams is None:
+        print(f"  (no team registry at {os.path.relpath(teams_src, REPO_ROOT)})")
+
     print(f"exported {len(rows)} tournaments -> {out}")
     for r in rows:
         print(f"  {r['status']:6s} {r['dates']['start'] or '   ?    '}  "

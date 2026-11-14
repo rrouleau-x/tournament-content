@@ -1,3 +1,40 @@
 {
-  "rules": {}
+  "rules": {
+    "fullLink": "https://soccer.sincsports.com/ttcontent.aspx?tid=COASTSP8&tab=1",
+    "keyRules": [
+      {
+        "label": "Dates",
+        "value": "April 24-25, 2027"
+      },
+      {
+        "label": "Ages",
+        "value": "U8-U12 boys and girls; Rec, Challenge, Classic, Premier"
+      },
+      {
+        "label": "Format (U9/U10)",
+        "value": "7v7 at Market Commons Complex and Socastee Park"
+      },
+      {
+        "label": "Entry fee",
+        "value": "$750 for 7v7 · $850 for 9v9"
+      },
+      {
+        "label": "Registration closes",
+        "value": "Midnight April 12, 2027"
+      },
+      {
+        "label": "Divisions posted",
+        "value": "April 14, 2027"
+      },
+      {
+        "label": "Schedules posted",
+        "value": "April 17, 2027"
+      },
+      {
+        "label": "Check-in",
+        "value": "Online check-in only"
+      }
+    ],
+    "tiebreakers": []
+  }
 }

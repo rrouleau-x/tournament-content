@@ -3,5 +3,12 @@
   "org": "savannah-united",
   "slug": "bvbia-dublin-festival-2027",
   "status": "draft",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "revision": {
+    "workflow": "approved",
+    "digest": "592b883901af151f",
+    "publishedAt": null,
+    "reviewer": "admin",
+    "approvedAt": "2026-11-14T06:36:31Z"
+  }
 }

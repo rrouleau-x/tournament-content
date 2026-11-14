@@ -3,5 +3,12 @@
   "org": "savannah-united",
   "slug": "fesa-florida-state-invitational-2027",
   "status": "draft",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "revision": {
+    "workflow": "approved",
+    "digest": "7375cbb5df67f031",
+    "publishedAt": null,
+    "reviewer": "admin",
+    "approvedAt": "2026-11-14T06:36:30Z"
+  }
 }

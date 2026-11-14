@@ -20,7 +20,9 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -85,6 +87,88 @@ def entry(slug, tdir, manifest, bundle):
     }
 
 
+
+def to_app_contract(bundle, teams_registry, default_team):
+    """Shape a compiled bundle for the Carolina-style app shell.
+
+    The shell reads a specific contract (venue.assigned/city/mapsUrl,
+    hotels.portal, rules.tiebreakersPending, contacts.coaches, offline.*,
+    teams[] + defaultTeam). Our modules already match most of it; this fills the
+    gaps from the bundle itself and never from another tournament's data.
+    """
+    b = dict(bundle)
+    t = b.get("tournament") or {}
+    v = dict(b.get("venue") or {})
+    addr = str(v.get("address") or "")
+    known = bool(addr) and not re.search(r"not yet announced|venue tbd|^tbd", addr, re.I)
+    core = re.split(r"\s*\(", addr)[0].strip()   # drop "(fields not yet assigned)" style asides
+    parts = [x.strip() for x in core.split(",") if x.strip()]
+    v["assigned"] = known
+    v.setdefault("city", f"{parts[-2]}, {parts[-1]}" if len(parts) >= 2 else (parts[0] if parts else ""))
+    if known and not v.get("mapsUrl"):
+        v["mapsUrl"] = "https://www.google.com/maps/?q=" + urllib.parse.quote(core)
+    v.setdefault("coordinates", None)
+    v.setdefault("complexes", [])
+    b["venue"] = v
+
+    b["tournament"] = dict(t, build=(t.get("build") or "v1"))
+
+    h = dict(b.get("hotels") or {})
+    h.setdefault("portal", "")
+    h.setdefault("updatedAt", "")
+    h.setdefault("source", "")
+    h.setdefault("official", [])
+    h.setdefault("nonOfficial", [])
+    h.setdefault("stayToPlay", False)
+    b["hotels"] = h
+
+    r = dict(b.get("rules") or {})
+    r.setdefault("keyRules", [])
+    r.setdefault("tiebreakers", [])
+    r.setdefault("tiebreakersPending", not bool(r.get("tiebreakers")))
+    r.setdefault("directorContact", "")
+    r.setdefault("bracketContact", "")
+    b["rules"] = r
+
+    c = dict(b.get("contacts") or {})
+    staff = []
+    if c.get("coach"):
+        staff.append(c["coach"])
+    staff.extend(c.get("premierStaff") or [])
+    c.setdefault("coaches", staff)
+    c.setdefault("tournamentDirector", {})
+    c.setdefault("emergency", "911")
+    b["contacts"] = c
+
+    o = dict(b.get("offline") or {})
+    o.setdefault("pdfGuideUrl", "")
+    o.setdefault("icsUrl", "")
+    o.setdefault("lastCached", "")
+    b["offline"] = o
+
+    ups = []
+    for u in (b.get("updates") or []):
+        ups.append({"type": u.get("type", "info"), "title": u.get("title", ""),
+                    "description": u.get("description", ""), "time": u.get("time", ""),
+                    "posted": u.get("posted", "")})
+    b["updates"] = ups
+
+    w = dict(b.get("weather") or {})
+    w.setdefault("summary", "")
+    w.setdefault("details", "")
+    w.setdefault("days", [])
+    w.setdefault("forecastLink", "")
+    w.setdefault("source", "")
+    w.setdefault("updatedAt", "")
+    b["weather"] = w
+    b.setdefault("venueRules", {})
+    b.setdefault("checklist", {"player": [], "weather": [], "parent": [], "emergency": []})
+    b.setdefault("nearby", {})
+    b["teams"] = teams_registry
+    b["defaultTeam"] = default_team
+    return b
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--org", default="savannah-united")
@@ -98,6 +182,11 @@ def main(argv=None):
 
     out = os.path.expanduser(args.out)
     today = datetime.date.today().isoformat()
+    # team registry is needed while writing bundles (the app shell reads teams[])
+    _tsrc = os.path.join(REPO_ROOT, "orgs", args.org, "teams.json")
+    _teams = load_json(_tsrc, default=None) if os.path.exists(_tsrc) else None
+    teams_registry = (_teams or {}).get("teams", [])
+    teams_default = (_teams or {}).get("defaultTeam", "")
     rows, skipped = [], []
     for slug, tdir, manifest in collect(args.org):
         try:
@@ -112,7 +201,8 @@ def main(argv=None):
             continue
         rows.append(row)
         if not args.dry_run:
-            write_json(os.path.join(out, "tournaments", f"{slug}.json"), bundle)
+            write_json(os.path.join(out, "tournaments", f"{slug}.json"),
+                       to_app_contract(bundle, teams_registry, teams_default))
 
     # chronological: the next event first
     rows.sort(key=lambda r: (r["dates"]["start"] or "9999", r["slug"]))

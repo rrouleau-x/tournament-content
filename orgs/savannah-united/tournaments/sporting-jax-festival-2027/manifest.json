@@ -3,5 +3,12 @@
   "org": "savannah-united",
   "slug": "sporting-jax-festival-2027",
   "status": "draft",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "revision": {
+    "workflow": "approved",
+    "digest": "bd3c8b17709df2d1",
+    "publishedAt": null,
+    "reviewer": "admin",
+    "approvedAt": "2026-11-14T06:36:30Z"
+  }
 }

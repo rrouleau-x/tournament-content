@@ -1,7 +1,14 @@
 {
-  "name": "Florida Elite Winter Invitational",
+  "name": "Sporting Jax Winter Invitational",
   "org": "savannah-united",
-  "slug": "florida-elite-winter-invitational-2027",
+  "slug": "sporting-jax-winter-invitational-2027",
   "status": "draft",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "revision": {
+    "workflow": "approved",
+    "digest": "991cc534cf18bf57",
+    "publishedAt": null,
+    "reviewer": "admin",
+    "approvedAt": "2026-11-14T10:13:17Z"
+  }
 }

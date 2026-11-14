@@ -3,5 +3,12 @@
   "org": "savannah-united",
   "slug": "coast-fa-spring-classic-2027",
   "status": "draft",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "revision": {
+    "workflow": "approved",
+    "digest": "30c1cd58971b6cdb",
+    "publishedAt": null,
+    "reviewer": "admin",
+    "approvedAt": "2026-11-13T22:38:16Z"
+  }
 }

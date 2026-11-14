@@ -1,3 +1,55 @@
 {
-  "rules": {}
+  "rules": {
+    "fullLink": "https://docs.google.com/document/d/e/2PACX-1vT6XxZhuaK1sKrRj5uSFNlsgHr6Vpqo7Iyz02sL6gOoKl_ZfPnFu7ym0mYgXjtpKvSytDpnDVx_vTs8/pub",
+    "keyRules": [
+      {
+        "label": "Game length",
+        "value": "25-minute halves, 5-minute half-time (U9/U10)"
+      },
+      {
+        "label": "Format",
+        "value": "7v7 · max roster 12 · up to 3 guest players"
+      },
+      {
+        "label": "Heading",
+        "value": "Not allowed U12 and younger — indirect free kick"
+      },
+      {
+        "label": "Offside",
+        "value": "One referee for U9/U10, obvious offside only; no build-out lines"
+      },
+      {
+        "label": "Substitutions",
+        "value": "Unlimited, at referee's discretion"
+      },
+      {
+        "label": "Mercy rule",
+        "value": "Match ends at 8-goal differential"
+      },
+      {
+        "label": "Water breaks",
+        "value": "Mandatory at mid-half when 85°F is expected"
+      },
+      {
+        "label": "Forfeits",
+        "value": "Not ready in 5 min = 4-0; be there 30 min early"
+      },
+      {
+        "label": "Championship tie",
+        "value": "Straight to penalty kicks"
+      },
+      {
+        "label": "Weather",
+        "value": "Stopped after half-time = final score; no guaranteed refunds"
+      }
+    ],
+    "tiebreakers": [
+      "Head-to-head result",
+      "Net goal differential, max 4 per game",
+      "Most goals scored, max 6 per game",
+      "Fewest goals allowed",
+      "Most shutouts",
+      "Penalty kicks per FIFA"
+    ]
+  }
 }

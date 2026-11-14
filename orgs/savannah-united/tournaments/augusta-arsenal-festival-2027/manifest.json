@@ -3,5 +3,12 @@
   "org": "savannah-united",
   "slug": "augusta-arsenal-festival-2027",
   "status": "draft",
-  "schemaVersion": 1
+  "schemaVersion": 1,
+  "revision": {
+    "workflow": "approved",
+    "digest": "d575bf8d155d038a",
+    "publishedAt": null,
+    "reviewer": "admin",
+    "approvedAt": "2026-11-14T06:36:30Z"
+  }
 }

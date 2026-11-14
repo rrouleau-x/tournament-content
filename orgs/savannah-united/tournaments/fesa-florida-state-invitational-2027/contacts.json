@@ -1,30 +1,32 @@
 {
-  "contacts": {
-    "manager": {
-      "name": "Rich Rouleau",
-      "role": "Parent Team Manager",
-      "phone": "",
-      "email": "rrouleau@mac.com"
-    },
-    "coach": {
-      "name": "Keith Gunn",
-      "role": "Head Coach",
-      "phone": "",
-      "email": "k.gunn@savannahunited.com"
-    },
-    "teamManagers": [],
-    "premierStaff": [
-      {
-        "name": "Carson Gray",
-        "role": "Coach",
-        "phone": "912-856-9442"
-      },
-      {
-        "name": "Mitchell Heath",
-        "role": "Coach",
-        "phone": ""
-      }
-    ],
-    "emergency": "911"
-  }
+ "contacts": {
+  "manager": {
+   "name": "Rich Rouleau",
+   "role": "Parent Team Manager",
+   "phone": "",
+   "email": "rrouleau@mac.com"
+  },
+  "coach": {
+   "name": "Keith Gunn",
+   "role": "Head Coach",
+   "phone": "",
+   "email": "k.gunn@savannahunited.com"
+  },
+  "teamManagers": [],
+  "premierStaff": [
+   {
+    "name": "Carson Gray",
+    "role": "Coach",
+    "phone": "912-856-9442",
+    "email": "carsonzgray@gmail.com"
+   },
+   {
+    "name": "Mitchell Heath",
+    "role": "Coach",
+    "phone": "",
+    "email": "m.heath@savannahunited.com"
+   }
+  ],
+  "emergency": "911"
+ }
 }

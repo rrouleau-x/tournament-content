@@ -1,12 +1,5 @@
 {
- "games": [
-  {
-   "date": "2027-01-23",
-   "time": "9:00 AM",
-   "field": "3A",
-   "opponent": "Florida Elite 17B"
-  }
- ],
+ "games": [],
  "scheduleStatus": "pending",
  "scheduleExpected": "Official: Sporting Jax Winter Invitational, Jan 23-24 2027, U9-U14 competitive, Jacksonville/St Johns County. Stay-to-play for teams travelling >90 mi. Schedule and standings published 'coming soon' on sportingjaxacademy.com/WinterInvitational."
 }
